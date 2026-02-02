@@ -19,7 +19,33 @@ struct SongsView: View {
                 })
                 .padding()
 
-                if !spotifyManager.isAuthenticated && spotifyManager.accessToken == nil {
+                if spotifyManager.needsConfiguration {
+                    // Spotify not configured
+                    VStack(spacing: 20) {
+                        Image(systemName: "gearshape.2")
+                            .font(.system(size: 60))
+                            .foregroundColor(.orange)
+
+                        Text("Setup Required")
+                            .font(.title2)
+                            .fontWeight(.bold)
+
+                        Text("To use the Songs feature, you need to:\n\n1. Go to developer.spotify.com/dashboard\n2. Create an app to get credentials\n3. Add your Client ID and Secret\n   in SpotifyManager.swift")
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                            .font(.subheadline)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxHeight: .infinity)
+                } else if spotifyManager.isAuthenticating {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Connecting to Spotify...")
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxHeight: .infinity)
+                } else if !spotifyManager.isAuthenticated && spotifyManager.accessToken == nil {
                     // Not authenticated yet
                     VStack(spacing: 20) {
                         Image(systemName: "music.note.list")
@@ -156,13 +182,6 @@ struct SongsView: View {
             .sheet(isPresented: $showLyricsView) {
                 if let track = selectedTrack {
                     LyricsView(track: track)
-                }
-            }
-            .onAppear {
-                if spotifyManager.accessToken == nil {
-                    Task {
-                        await spotifyManager.authenticate()
-                    }
                 }
             }
         }

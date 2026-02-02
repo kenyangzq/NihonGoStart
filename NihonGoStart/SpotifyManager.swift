@@ -14,20 +14,45 @@ class SpotifyManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var searchResults: [SpotifyTrack] = []
     @Published var isSearching = false
+    @Published var isAuthenticating = false
     @Published var errorMessage: String?
+    @Published var needsConfiguration = false
 
     private var audioPlayer: AVPlayer?
     @Published var isPlaying = false
     @Published var currentTrack: SpotifyTrack?
 
-    private init() {}
+    private init() {
+        // Check if credentials are configured
+        if clientId == "YOUR_CLIENT_ID" || clientSecret == "YOUR_CLIENT_SECRET" {
+            needsConfiguration = true
+        }
+    }
 
     // MARK: - Authentication
 
     func authenticate() async {
+        // Check if already authenticating or if credentials not set
+        if needsConfiguration {
+            await MainActor.run {
+                self.errorMessage = "Spotify API credentials not configured. Please add your Client ID and Secret in SpotifyManager.swift"
+            }
+            return
+        }
+
+        await MainActor.run {
+            self.isAuthenticating = true
+            self.errorMessage = nil
+        }
+
         let tokenURL = "https://accounts.spotify.com/api/token"
         let credentials = "\(clientId):\(clientSecret)"
-        guard let credentialsData = credentials.data(using: .utf8) else { return }
+        guard let credentialsData = credentials.data(using: .utf8) else {
+            await MainActor.run {
+                self.isAuthenticating = false
+            }
+            return
+        }
         let base64Credentials = credentialsData.base64EncodedString()
 
         var request = URLRequest(url: URL(string: tokenURL)!)
@@ -35,6 +60,7 @@ class SpotifyManager: ObservableObject {
         request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = "grant_type=client_credentials".data(using: .utf8)
+        request.timeoutInterval = 10 // 10 second timeout
 
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
@@ -43,12 +69,20 @@ class SpotifyManager: ObservableObject {
                 await MainActor.run {
                     self.accessToken = token
                     self.isAuthenticated = true
+                    self.isAuthenticating = false
                     self.errorMessage = nil
+                }
+            } else if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let error = json["error"] as? String {
+                await MainActor.run {
+                    self.isAuthenticating = false
+                    self.errorMessage = "Spotify error: \(error)"
                 }
             }
         } catch {
             await MainActor.run {
-                self.errorMessage = "Authentication failed: \(error.localizedDescription)"
+                self.isAuthenticating = false
+                self.errorMessage = "Connection failed. Check your internet connection."
             }
         }
     }
