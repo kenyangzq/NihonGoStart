@@ -3,6 +3,22 @@ import PhotosUI
 import UniformTypeIdentifiers
 import Translation
 
+enum TargetLanguage: String, CaseIterable {
+    case english = "en"
+    case chinese = "zh-Hans"
+
+    var displayName: String {
+        switch self {
+        case .english: return "English"
+        case .chinese: return "Chinese"
+        }
+    }
+
+    var localeLanguage: Locale.Language {
+        Locale.Language(identifier: rawValue)
+    }
+}
+
 struct ComicTranslationView: View {
     @StateObject private var manager = ComicTranslationManager.shared
     @State private var selectedImage: UIImage?
@@ -12,6 +28,8 @@ struct ComicTranslationView: View {
     @State private var showingDocumentPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var translationConfiguration: TranslationSession.Configuration?
+    @State private var targetLanguage: TargetLanguage = .english
+    @State private var showOverlay = false
 
     private let speechManager = SpeechManager.shared
 
@@ -56,6 +74,12 @@ struct ComicTranslationView: View {
         .onChange(of: manager.shouldTriggerTranslation) { _, shouldTranslate in
             if shouldTranslate {
                 triggerTranslation()
+            }
+        }
+        .onChange(of: targetLanguage) { _, _ in
+            // Re-translate when language changes
+            if !manager.extractedTexts.isEmpty {
+                retranslate()
             }
         }
         .translationTask(translationConfiguration) { session in
@@ -119,14 +143,25 @@ struct ComicTranslationView: View {
     private var contentView: some View {
         ScrollView {
             VStack(spacing: 16) {
+                // Controls bar
+                controlsBar
+
+                // Image display with optional overlay
                 if let image = currentDisplayImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 300)
-                        .cornerRadius(12)
-                        .shadow(radius: 4)
-                        .padding(.horizontal)
+                    ZStack {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+
+                        if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing {
+                            GeometryReader { geometry in
+                                translationOverlay(in: geometry.size)
+                            }
+                        }
+                    }
+                    .cornerRadius(12)
+                    .shadow(radius: 4)
+                    .padding(.horizontal)
                 }
 
                 if pdfPages.count > 1 {
@@ -158,7 +193,7 @@ struct ComicTranslationView: View {
                     .padding(.horizontal)
                 }
 
-                if !manager.extractedTexts.isEmpty {
+                if !manager.extractedTexts.isEmpty && !showOverlay {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Extracted Text (\(manager.extractedTexts.count))")
                             .font(.headline)
@@ -175,6 +210,73 @@ struct ComicTranslationView: View {
             }
             .padding(.vertical)
         }
+    }
+
+    // MARK: - Controls Bar
+
+    private var controlsBar: some View {
+        VStack(spacing: 12) {
+            // Language picker
+            HStack {
+                Text("Translate to:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Picker("Language", selection: $targetLanguage) {
+                    ForEach(TargetLanguage.allCases, id: \.self) { lang in
+                        Text(lang.displayName).tag(lang)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(.horizontal)
+
+            // Overlay toggle
+            HStack {
+                Text("Show overlay:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Toggle("", isOn: $showOverlay)
+                    .labelsHidden()
+                    .tint(.red)
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical, 8)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal)
+    }
+
+    // MARK: - Translation Overlay
+
+    private func translationOverlay(in size: CGSize) -> some View {
+        ZStack {
+            ForEach(manager.extractedTexts) { text in
+                if !text.translation.isEmpty {
+                    Text(text.translation)
+                        .font(.system(size: calculateFontSize(for: text.boundingBox, in: size)))
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .padding(4)
+                        .background(Color.black.opacity(0.85))
+                        .cornerRadius(4)
+                        .position(
+                            x: text.boundingBox.midX * size.width,
+                            y: text.boundingBox.midY * size.height
+                        )
+                }
+            }
+        }
+    }
+
+    private func calculateFontSize(for boundingBox: CGRect, in size: CGSize) -> CGFloat {
+        let boxHeight = boundingBox.height * size.height
+        // Scale font to fit roughly within the bounding box
+        return max(8, min(boxHeight * 0.6, 16))
     }
 
     // MARK: - PDF Navigation
@@ -205,8 +307,17 @@ struct ComicTranslationView: View {
     private func triggerTranslation() {
         translationConfiguration = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en")
+            target: targetLanguage.localeLanguage
         )
+    }
+
+    private func retranslate() {
+        // Clear existing translations and re-trigger
+        for index in manager.extractedTexts.indices {
+            manager.updateTranslation(at: index, with: "")
+        }
+        manager.shouldTriggerTranslation = true
+        triggerTranslation()
     }
 
     private func performTranslation(session: TranslationSession) async {
@@ -282,6 +393,7 @@ struct ComicTranslationView: View {
         manager.extractedTexts = []
         manager.errorMessage = nil
         translationConfiguration = nil
+        showOverlay = false
     }
 }
 
