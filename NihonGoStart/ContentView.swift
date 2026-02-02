@@ -9,6 +9,7 @@ enum AppTab: Int, CaseIterable, Identifiable {
     case sentences
     case grammar
     case songs
+    case comic
 
     var id: Int { rawValue }
 
@@ -21,6 +22,7 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .sentences: return "Sentences"
         case .grammar: return "Grammar"
         case .songs: return "Songs"
+        case .comic: return "Comic"
         }
     }
 
@@ -33,6 +35,7 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .sentences: return "text.quote"
         case .grammar: return "book"
         case .songs: return "music.note.list"
+        case .comic: return "doc.text.magnifyingglass"
         }
     }
 }
@@ -59,6 +62,8 @@ struct ContentView: View {
                     GrammarView()
                 case .songs:
                     SongsView()
+                case .comic:
+                    ComicTranslationView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

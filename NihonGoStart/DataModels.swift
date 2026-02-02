@@ -202,3 +202,12 @@ struct SavedLyricLine: Identifiable, Codable {
         case japanese, romaji, translation
     }
 }
+
+// MARK: - Comic Translation
+
+struct ExtractedText: Identifiable {
+    let id = UUID()
+    let japanese: String
+    var translation: String
+    let boundingBox: CGRect  // For future overlay feature
+}
