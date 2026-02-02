@@ -21,23 +21,36 @@ enum TargetLanguage: String, CaseIterable {
 
 struct ComicTranslationView: View {
     @StateObject private var manager = ComicTranslationManager.shared
-    @State private var selectedImage: UIImage?
+    @State private var selectedImages: [UIImage] = []
     @State private var pdfPages: [UIImage] = []
     @State private var currentPageIndex = 0
     @State private var showingImagePicker = false
     @State private var showingDocumentPicker = false
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var translationConfiguration: TranslationSession.Configuration?
-    @State private var targetLanguage: TargetLanguage = .english
+    @State private var targetLanguage: TargetLanguage = .chinese
     @State private var showOverlay = false
+    @State private var showingSaveAlert = false
+    @State private var saveAlertMessage = ""
 
     private let speechManager = SpeechManager.shared
+    private let maxImageSelection = 9
 
     var currentDisplayImage: UIImage? {
-        if !pdfPages.isEmpty {
+        if !pdfPages.isEmpty && currentPageIndex < pdfPages.count {
             return pdfPages[currentPageIndex]
         }
-        return selectedImage
+        if !selectedImages.isEmpty && currentPageIndex < selectedImages.count {
+            return selectedImages[currentPageIndex]
+        }
+        return nil
+    }
+
+    var totalPages: Int {
+        if !pdfPages.isEmpty {
+            return pdfPages.count
+        }
+        return selectedImages.count
     }
 
     var body: some View {
@@ -62,10 +75,10 @@ struct ComicTranslationView: View {
                 }
             }
         }
-        .photosPicker(isPresented: $showingImagePicker, selection: $selectedPhotoItem, matching: .images)
-        .onChange(of: selectedPhotoItem) { _, newValue in
+        .photosPicker(isPresented: $showingImagePicker, selection: $selectedPhotoItems, maxSelectionCount: maxImageSelection, matching: .images)
+        .onChange(of: selectedPhotoItems) { _, newValue in
             Task {
-                await loadImage(from: newValue)
+                await loadImages(from: newValue)
             }
         }
         .sheet(isPresented: $showingDocumentPicker) {
@@ -84,6 +97,11 @@ struct ComicTranslationView: View {
         }
         .translationTask(translationConfiguration) { session in
             await performTranslation(session: session)
+        }
+        .alert("Save Image", isPresented: $showingSaveAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(saveAlertMessage)
         }
     }
 
@@ -164,8 +182,8 @@ struct ComicTranslationView: View {
                     .padding(.horizontal)
                 }
 
-                if pdfPages.count > 1 {
-                    pdfNavigationView
+                if totalPages > 1 {
+                    pageNavigationView
                 }
 
                 if manager.isProcessing {
@@ -231,17 +249,26 @@ struct ComicTranslationView: View {
             }
             .padding(.horizontal)
 
-            // Overlay toggle
+            // Overlay toggle and save button
             HStack {
                 Text("Show overlay:")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                Spacer()
-
                 Toggle("", isOn: $showOverlay)
                     .labelsHidden()
                     .tint(.red)
+
+                Spacer()
+
+                if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing {
+                    Button(action: saveOverlayImage) {
+                        Label("Save", systemImage: "square.and.arrow.down")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.red)
+                }
             }
             .padding(.horizontal)
         }
@@ -257,31 +284,36 @@ struct ComicTranslationView: View {
         ZStack {
             ForEach(manager.extractedTexts) { text in
                 if !text.translation.isEmpty {
-                    Text(text.translation)
-                        .font(.system(size: calculateFontSize(for: text.boundingBox, in: size)))
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(4)
-                        .background(Color.black.opacity(0.85))
-                        .cornerRadius(4)
-                        .position(
-                            x: text.boundingBox.midX * size.width,
-                            y: text.boundingBox.midY * size.height
-                        )
+                    let isVertical = isVerticalText(text.boundingBox)
+                    let boxRect = CGRect(
+                        x: text.boundingBox.minX * size.width,
+                        y: text.boundingBox.minY * size.height,
+                        width: text.boundingBox.width * size.width,
+                        height: text.boundingBox.height * size.height
+                    )
+
+                    TranslationOverlayText(
+                        translation: text.translation,
+                        isVertical: isVertical,
+                        boxRect: boxRect
+                    )
+                    .position(
+                        x: boxRect.midX,
+                        y: boxRect.midY
+                    )
                 }
             }
         }
     }
 
-    private func calculateFontSize(for boundingBox: CGRect, in size: CGSize) -> CGFloat {
-        let boxHeight = boundingBox.height * size.height
-        // Scale font to fit roughly within the bounding box
-        return max(8, min(boxHeight * 0.6, 16))
+    private func isVerticalText(_ boundingBox: CGRect) -> Bool {
+        // If height > width * 1.5, likely vertical text
+        return boundingBox.height > boundingBox.width * 1.5
     }
 
-    // MARK: - PDF Navigation
+    // MARK: - Page Navigation
 
-    private var pdfNavigationView: some View {
+    private var pageNavigationView: some View {
         HStack {
             Button(action: previousPage) {
                 Image(systemName: "chevron.left.circle.fill")
@@ -289,7 +321,7 @@ struct ComicTranslationView: View {
             }
             .disabled(currentPageIndex == 0)
 
-            Text("Page \(currentPageIndex + 1) of \(pdfPages.count)")
+            Text("\(!pdfPages.isEmpty ? "Page" : "Image") \(currentPageIndex + 1) of \(totalPages)")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
@@ -297,7 +329,7 @@ struct ComicTranslationView: View {
                 Image(systemName: "chevron.right.circle.fill")
                     .font(.title2)
             }
-            .disabled(currentPageIndex >= pdfPages.count - 1)
+            .disabled(currentPageIndex >= totalPages - 1)
         }
         .foregroundColor(.red)
     }
@@ -342,20 +374,32 @@ struct ComicTranslationView: View {
 
     // MARK: - Actions
 
-    private func loadImage(from item: PhotosPickerItem?) async {
-        guard let item = item else { return }
+    private func loadImages(from items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
 
-        if let data = try? await item.loadTransferable(type: Data.self),
-           let image = UIImage(data: data) {
-            pdfPages = []
-            currentPageIndex = 0
-            selectedImage = image
-            await manager.processImage(image)
+        var images: [UIImage] = []
+
+        for item in items {
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let image = UIImage(data: data) {
+                images.append(image)
+            }
         }
+
+        guard !images.isEmpty else { return }
+
+        await MainActor.run {
+            pdfPages = []
+            selectedImages = images
+            currentPageIndex = 0
+        }
+
+        // Process the first image
+        await manager.processImage(images[0])
     }
 
     private func handlePDFSelection(_ url: URL) {
-        selectedImage = nil
+        selectedImages = []
         pdfPages = manager.extractPDFPages(from: url)
         currentPageIndex = 0
 
@@ -373,27 +417,137 @@ struct ComicTranslationView: View {
     }
 
     private func nextPage() {
-        guard currentPageIndex < pdfPages.count - 1 else { return }
+        guard currentPageIndex < totalPages - 1 else { return }
         currentPageIndex += 1
         processCurrentPage()
     }
 
     private func processCurrentPage() {
-        guard currentPageIndex < pdfPages.count else { return }
+        guard let image = currentDisplayImage else { return }
         Task {
-            await manager.processImage(pdfPages[currentPageIndex])
+            await manager.processImage(image)
         }
     }
 
     private func clearSelection() {
-        selectedImage = nil
+        selectedImages = []
         pdfPages = []
         currentPageIndex = 0
-        selectedPhotoItem = nil
+        selectedPhotoItems = []
         manager.extractedTexts = []
         manager.errorMessage = nil
         translationConfiguration = nil
         showOverlay = false
+    }
+
+    private func saveOverlayImage() {
+        guard let originalImage = currentDisplayImage else { return }
+
+        let imageSize = originalImage.size
+        let renderer = UIGraphicsImageRenderer(size: imageSize)
+
+        let overlayedImage = renderer.image { context in
+            // Draw original image
+            originalImage.draw(at: .zero)
+
+            // Draw translation overlays
+            for text in manager.extractedTexts where !text.translation.isEmpty {
+                let isVertical = isVerticalText(text.boundingBox)
+                let boxRect = CGRect(
+                    x: text.boundingBox.minX * imageSize.width,
+                    y: text.boundingBox.minY * imageSize.height,
+                    width: text.boundingBox.width * imageSize.width,
+                    height: text.boundingBox.height * imageSize.height
+                )
+
+                // Draw background
+                context.cgContext.setFillColor(UIColor.black.withAlphaComponent(0.9).cgColor)
+                let backgroundPath = UIBezierPath(roundedRect: boxRect, cornerRadius: 4)
+                context.cgContext.addPath(backgroundPath.cgPath)
+                context.cgContext.fillPath()
+
+                // Calculate font size
+                let fontSize: CGFloat
+                if isVertical {
+                    let size = min(boxRect.width * 0.8, boxRect.height / max(1, CGFloat(text.translation.count)) * 1.2)
+                    fontSize = max(6, min(size, 14))
+                } else {
+                    let size = boxRect.height * 0.5
+                    fontSize = max(6, min(size, 14))
+                }
+
+                // Draw text
+                let font = UIFont.boldSystemFont(ofSize: fontSize)
+                let paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.alignment = .center
+                paragraphStyle.lineBreakMode = .byWordWrapping
+
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: UIColor.white,
+                    .paragraphStyle: paragraphStyle
+                ]
+
+                let attributedString = NSAttributedString(string: text.translation, attributes: attributes)
+                let textRect = boxRect.insetBy(dx: 2, dy: 2)
+                attributedString.draw(in: textRect)
+            }
+        }
+
+        // Save to photo library
+        UIImageWriteToSavedPhotosAlbum(overlayedImage, nil, nil, nil)
+        saveAlertMessage = "Image saved to Photos"
+        showingSaveAlert = true
+    }
+}
+
+// MARK: - Translation Overlay Text
+
+struct TranslationOverlayText: View {
+    let translation: String
+    let isVertical: Bool
+    let boxRect: CGRect
+
+    var body: some View {
+        if isVertical {
+            // Vertical text overlay
+            Text(translation)
+                .font(.system(size: calculateFontSize()))
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .lineLimit(nil)
+                .multilineTextAlignment(.center)
+                .frame(width: boxRect.width, height: boxRect.height)
+                .padding(2)
+                .background(Color.black.opacity(0.9))
+                .cornerRadius(4)
+                .rotationEffect(.degrees(0)) // Keep upright but constrain to vertical box
+        } else {
+            // Horizontal text overlay
+            Text(translation)
+                .font(.system(size: calculateFontSize()))
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .lineLimit(nil)
+                .minimumScaleFactor(0.3)
+                .multilineTextAlignment(.center)
+                .frame(width: boxRect.width, height: boxRect.height)
+                .padding(2)
+                .background(Color.black.opacity(0.9))
+                .cornerRadius(4)
+        }
+    }
+
+    private func calculateFontSize() -> CGFloat {
+        if isVertical {
+            // For vertical boxes, use width as the constraint
+            let size = min(boxRect.width * 0.8, boxRect.height / max(1, CGFloat(translation.count)) * 1.2)
+            return max(6, min(size, 14))
+        } else {
+            // For horizontal boxes, use height as the constraint
+            let size = boxRect.height * 0.5
+            return max(6, min(size, 14))
+        }
     }
 }
 

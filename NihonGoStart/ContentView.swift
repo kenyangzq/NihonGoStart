@@ -1,15 +1,39 @@
 import SwiftUI
 import UIKit
 
-enum AppTab: Int, CaseIterable, Identifiable {
+// Main tabs: Learn, Songs, Comic
+enum MainTab: Int, CaseIterable, Identifiable {
+    case learn = 0
+    case songs
+    case comic
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .learn: return "Learn"
+        case .songs: return "Songs"
+        case .comic: return "Comic"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .learn: return "book.fill"
+        case .songs: return "music.note.list"
+        case .comic: return "doc.text.magnifyingglass"
+        }
+    }
+}
+
+// Sub-tabs within Learn
+enum LearnSubTab: Int, CaseIterable, Identifiable {
     case kana = 0
     case kanaPractice
     case vocabulary
     case phrases
     case sentences
     case grammar
-    case songs
-    case comic
 
     var id: Int { rawValue }
 
@@ -21,8 +45,6 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .phrases: return "Phrases"
         case .sentences: return "Sentences"
         case .grammar: return "Grammar"
-        case .songs: return "Songs"
-        case .comic: return "Comic"
         }
     }
 
@@ -34,32 +56,43 @@ enum AppTab: Int, CaseIterable, Identifiable {
         case .phrases: return "text.bubble"
         case .sentences: return "text.quote"
         case .grammar: return "book"
-        case .songs: return "music.note.list"
-        case .comic: return "doc.text.magnifyingglass"
         }
     }
 }
 
 struct ContentView: View {
-    @State private var selectedTab: AppTab = .kana
+    @State private var selectedMainTab: MainTab = .learn
+    @State private var selectedLearnSubTab: LearnSubTab = .kana
 
     var body: some View {
         VStack(spacing: 0) {
             // Content area
             Group {
-                switch selectedTab {
-                case .kana:
-                    KanaView()
-                case .kanaPractice:
-                    KanaFlashcardView()
-                case .vocabulary:
-                    FlashcardView()
-                case .phrases:
-                    PhrasesView()
-                case .sentences:
-                    SentencesView()
-                case .grammar:
-                    GrammarView()
+                switch selectedMainTab {
+                case .learn:
+                    VStack(spacing: 0) {
+                        // Secondary tab bar for Learn
+                        LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
+
+                        // Learn content
+                        Group {
+                            switch selectedLearnSubTab {
+                            case .kana:
+                                KanaView()
+                            case .kanaPractice:
+                                KanaFlashcardView()
+                            case .vocabulary:
+                                FlashcardView()
+                            case .phrases:
+                                PhrasesView()
+                            case .sentences:
+                                SentencesView()
+                            case .grammar:
+                                GrammarView()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 case .songs:
                     SongsView()
                 case .comic:
@@ -68,30 +101,82 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Custom scrollable tab bar
-            ScrollableTabBar(selectedTab: $selectedTab)
+            // Main tab bar
+            MainTabBar(selectedTab: $selectedMainTab)
         }
         .edgesIgnoringSafeArea(.bottom)
     }
 }
 
-struct ScrollableTabBar: View {
-    @Binding var selectedTab: AppTab
+// MARK: - Learn Sub Tab Bar
+
+struct LearnSubTabBar: View {
+    @Binding var selectedSubTab: LearnSubTab
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(LearnSubTab.allCases) { tab in
+                    LearnSubTabButton(
+                        tab: tab,
+                        isSelected: selectedSubTab == tab,
+                        action: { selectedSubTab = tab }
+                    )
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(Color(UIColor.secondarySystemBackground))
+    }
+}
+
+struct LearnSubTabButton: View {
+    let tab: LearnSubTab
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 14))
+                Text(tab.title)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .semibold : .regular)
+            }
+            .foregroundColor(isSelected ? .white : .primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(isSelected ? Color.red : Color(UIColor.systemBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? Color.clear : Color.gray.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Main Tab Bar
+
+struct MainTabBar: View {
+    @Binding var selectedTab: MainTab
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(AppTab.allCases) { tab in
-                        TabBarButton(
-                            tab: tab,
-                            selectedTab: $selectedTab
-                        )
-                    }
+            HStack(spacing: 0) {
+                ForEach(MainTab.allCases) { tab in
+                    MainTabBarButton(
+                        tab: tab,
+                        selectedTab: $selectedTab
+                    )
                 }
-                .padding(.horizontal, 8)
             }
             .frame(height: 49)
             .background(Color(UIColor.secondarySystemBackground))
@@ -108,9 +193,9 @@ struct ScrollableTabBar: View {
     }
 }
 
-struct TabBarButton: View {
-    let tab: AppTab
-    @Binding var selectedTab: AppTab
+struct MainTabBarButton: View {
+    let tab: MainTab
+    @Binding var selectedTab: MainTab
 
     private var isSelected: Bool {
         selectedTab == tab
@@ -135,7 +220,8 @@ struct TabBarButton: View {
                     .fontWeight(isSelected ? .semibold : .regular)
             }
             .foregroundColor(isSelected ? .red : .gray)
-            .frame(width: 70, height: 49)
+            .frame(maxWidth: .infinity)
+            .frame(height: 49)
         }
         .buttonStyle(PlainButtonStyle())
     }
