@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum AppTab: Int, CaseIterable, Identifiable {
     case kana = 0
@@ -81,8 +82,7 @@ struct ScrollableTabBar: View {
                     ForEach(AppTab.allCases) { tab in
                         TabBarButton(
                             tab: tab,
-                            isSelected: selectedTab == tab,
-                            action: { selectedTab = tab }
+                            selectedTab: $selectedTab
                         )
                     }
                 }
@@ -105,18 +105,21 @@ struct ScrollableTabBar: View {
 
 struct TabBarButton: View {
     let tab: AppTab
-    let isSelected: Bool
-    let action: () -> Void
+    @Binding var selectedTab: AppTab
+
+    private var isSelected: Bool {
+        selectedTab == tab
+    }
 
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            selectedTab = tab
+        }) {
             VStack(spacing: 4) {
                 ZStack {
-                    if isSelected {
-                        Circle()
-                            .fill(Color.red.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                    }
+                    Circle()
+                        .fill(isSelected ? Color.red.opacity(0.15) : Color.clear)
+                        .frame(width: 36, height: 36)
                     Image(systemName: tab.icon)
                         .font(.system(size: 20))
                 }
