@@ -4,7 +4,7 @@ import AVFoundation
 struct SentencesView: View {
     @State private var allSentences = SeedData.sentences
     @State private var selectedTopic: String = "All"
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var topics: [String] {
         var topicList = Array(Set(allSentences.map { $0.topic })).sorted()
@@ -53,7 +53,7 @@ struct SentencesView: View {
                 .background(Color(UIColor.secondarySystemBackground))
 
                 List(filteredSentences) { sentence in
-                    SentenceRow(sentence: sentence, synthesizer: synthesizer, onTopicTap: { topic in
+                    SentenceRow(sentence: sentence, speechManager: speechManager, onTopicTap: { topic in
                         withAnimation {
                             selectedTopic = topic
                         }
@@ -100,7 +100,7 @@ struct TopicChip: View {
 
 struct SentenceRow: View {
     let sentence: Sentence
-    let synthesizer: AVSpeechSynthesizer
+    let speechManager: SpeechManager
     let onTopicTap: (String) -> Void
     @State private var isExpanded = false
 
@@ -131,7 +131,7 @@ struct SentenceRow: View {
                 Spacer()
 
                 Button(action: {
-                    speakJapanese(sentence.japanese)
+                    speechManager.speak(sentence.japanese)
                 }) {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.body)
@@ -188,11 +188,4 @@ struct SentenceRow: View {
         }
     }
 
-    func speakJapanese(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.8
-        synthesizer.speak(utterance)
-    }
 }

@@ -183,7 +183,7 @@ struct GroupChip: View {
 struct KanaCardView: View {
     let kana: KanaCharacter
     let isFlipped: Bool
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var groupColor: Color {
         switch kana.group {
@@ -227,7 +227,7 @@ struct KanaCardView: View {
                     .padding(.top, 10)
 
                     Button(action: {
-                        speakKana(kana.character)
+                        speechManager.speak(kana.character, rate: 0.7)
                     }) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.title2)
@@ -248,7 +248,7 @@ struct KanaCardView: View {
                         .foregroundColor(.secondary)
 
                     Button(action: {
-                        speakKana(kana.character)
+                        speechManager.speak(kana.character, rate: 0.7)
                     }) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.title2)
@@ -262,13 +262,5 @@ struct KanaCardView: View {
             .padding()
         }
         .frame(width: 320, height: 480)
-    }
-
-    func speakKana(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.7
-        synthesizer.speak(utterance)
     }
 }

@@ -379,7 +379,7 @@ struct LyricsView: View {
     @State private var showLyricsInput = false
     @State private var expandedLineId: UUID?
     @Environment(\.dismiss) private var dismiss
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var body: some View {
         NavigationView {
@@ -504,7 +504,7 @@ struct LyricsView: View {
                                         }
                                     },
                                     onSpeak: {
-                                        speakJapanese(line.japanese)
+                                        speechManager.speak(line.japanese, rate: 0.7)
                                     }
                                 )
                             }
@@ -557,13 +557,6 @@ struct LyricsView: View {
         isLoadingLyrics = false
     }
 
-    func speakJapanese(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.7
-        synthesizer.speak(utterance)
-    }
 }
 
 struct LyricLineView: View {

@@ -140,7 +140,7 @@ struct FlashcardView: View {
 struct CardView: View {
     let word: VocabularyWord
     let isFlipped: Bool
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var body: some View {
         ZStack {
@@ -171,7 +171,7 @@ struct CardView: View {
 
                     // Speaker button
                     Button(action: {
-                        speakJapanese(word.kana)
+                        speechManager.speak(word.kana)
                     }) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.title2)
@@ -197,7 +197,7 @@ struct CardView: View {
 
                     // Speaker button on back side too
                     Button(action: {
-                        speakJapanese(word.kana)
+                        speechManager.speak(word.kana)
                     }) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.title2)
@@ -211,13 +211,5 @@ struct CardView: View {
             .padding()
         }
         .frame(width: 320, height: 480)
-    }
-
-    func speakJapanese(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.8
-        synthesizer.speak(utterance)
     }
 }

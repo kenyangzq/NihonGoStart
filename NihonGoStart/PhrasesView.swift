@@ -4,7 +4,7 @@ import AVFoundation
 struct PhrasesView: View {
     @State private var allPhrases = SeedData.phrases
     @State private var selectedCategory: String = "All"
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var categories: [String] {
         var cats = Array(Set(allPhrases.map { $0.category })).sorted()
@@ -39,7 +39,7 @@ struct PhrasesView: View {
                 .background(Color(UIColor.secondarySystemBackground))
 
                 List(filteredPhrases) { phrase in
-                    PhraseRow(phrase: phrase, synthesizer: synthesizer, onCategoryTap: { category in
+                    PhraseRow(phrase: phrase, speechManager: speechManager, onCategoryTap: { category in
                         withAnimation {
                             selectedCategory = category
                         }
@@ -81,7 +81,7 @@ struct CategoryChip: View {
 
 struct PhraseRow: View {
     let phrase: Phrase
-    let synthesizer: AVSpeechSynthesizer
+    let speechManager: SpeechManager
     let onCategoryTap: (String) -> Void
 
     var body: some View {
@@ -94,7 +94,7 @@ struct PhraseRow: View {
                 Spacer()
 
                 Button(action: {
-                    speakJapanese(phrase.japanese)
+                    speechManager.speak(phrase.japanese)
                 }) {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.body)
@@ -135,13 +135,5 @@ struct PhraseRow: View {
             .buttonStyle(PlainButtonStyle())
         }
         .padding(.vertical, 8)
-    }
-
-    func speakJapanese(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.8
-        synthesizer.speak(utterance)
     }
 }

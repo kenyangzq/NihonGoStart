@@ -4,7 +4,7 @@ import AVFoundation
 struct GrammarView: View {
     let allGrammar = SeedData.grammar
     @State private var selectedCategory: GrammarCategory = .particles
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var filteredGrammar: [GrammarPoint] {
         allGrammar.filter { $0.category == selectedCategory }
@@ -31,7 +31,7 @@ struct GrammarView: View {
                 .background(Color(UIColor.secondarySystemBackground))
 
                 List(filteredGrammar) { point in
-                    GrammarRowView(point: point, synthesizer: synthesizer)
+                    GrammarRowView(point: point, speechManager: speechManager)
                 }
                 .listStyle(.plain)
             }
@@ -84,7 +84,7 @@ struct GrammarCategoryChip: View {
 
 struct GrammarRowView: View {
     let point: GrammarPoint
-    let synthesizer: AVSpeechSynthesizer
+    let speechManager: SpeechManager
 
     var levelColor: Color {
         switch point.level {
@@ -127,7 +127,9 @@ struct GrammarRowView: View {
                         .foregroundColor(.gray)
                     Spacer()
                     Button(action: {
-                        speakJapanese(point.exampleJp)
+                        // Extract just the Japanese part (before the romaji in parentheses)
+                        let japanesePart = point.exampleJp.components(separatedBy: " (").first ?? point.exampleJp
+                        speechManager.speak(japanesePart)
                     }) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.caption)
@@ -153,15 +155,5 @@ struct GrammarRowView: View {
             .cornerRadius(8)
         }
         .padding(.vertical, 8)
-    }
-
-    func speakJapanese(_ text: String) {
-        // Extract just the Japanese part (before the romaji in parentheses)
-        let japanesePart = text.components(separatedBy: " (").first ?? text
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: japanesePart)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.8
-        synthesizer.speak(utterance)
     }
 }

@@ -164,7 +164,7 @@ struct KanaRowView: View {
     let characters: [KanaCharacter]
     let vowels: [String]
     var accentColor: Color = .red
-    let synthesizer = AVSpeechSynthesizer()
+    private let speechManager = SpeechManager.shared
 
     var body: some View {
         HStack(spacing: 8) {
@@ -176,7 +176,7 @@ struct KanaRowView: View {
 
             ForEach(vowels, id: \.self) { vowel in
                 if let kana = findKana(forVowel: vowel) {
-                    KanaCell(character: kana, synthesizer: synthesizer, accentColor: accentColor)
+                    KanaCell(character: kana, speechManager: speechManager, accentColor: accentColor)
                 } else {
                     Text("")
                         .frame(width: 55, height: 55)
@@ -195,7 +195,7 @@ struct KanaRowView: View {
 
 struct KanaCell: View {
     let character: KanaCharacter
-    let synthesizer: AVSpeechSynthesizer
+    let speechManager: SpeechManager
     var accentColor: Color = .red
     @State private var isPressed = false
 
@@ -204,7 +204,7 @@ struct KanaCell: View {
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = true
             }
-            speakKana(character.character)
+            speechManager.speak(character.character, rate: 0.7)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 withAnimation(.easeInOut(duration: 0.1)) {
                     isPressed = false
@@ -230,13 +230,5 @@ struct KanaCell: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
-    }
-
-    func speakKana(_ text: String) {
-        synthesizer.stopSpeaking(at: .immediate)
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.7
-        synthesizer.speak(utterance)
     }
 }
