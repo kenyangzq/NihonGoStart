@@ -171,7 +171,7 @@ struct ComicTranslationView: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
 
-                        if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing {
+                        if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing && !manager.isTranslating {
                             GeometryReader { geometry in
                                 translationOverlay(in: geometry.size)
                             }
@@ -186,11 +186,11 @@ struct ComicTranslationView: View {
                     pageNavigationView
                 }
 
-                if manager.isProcessing {
+                if manager.isProcessing || manager.isTranslating {
                     VStack(spacing: 12) {
                         ProgressView()
                             .scaleEffect(1.2)
-                        Text("Extracting and translating text...")
+                        Text(manager.isProcessing ? "Extracting text..." : "Translating...")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
@@ -353,22 +353,46 @@ struct ComicTranslationView: View {
     }
 
     private func performTranslation(session: TranslationSession) async {
+        // Start a translation session
+        let sessionId = await MainActor.run {
+            manager.startTranslationSession()
+        }
+
         do {
             for (index, text) in manager.extractedTexts.enumerated() {
+                // Check if session is still valid before each translation
+                let isValid = await MainActor.run { manager.isSessionValid(sessionId) }
+                guard isValid else {
+                    // Session was cancelled, stop translating
+                    return
+                }
+
                 let response = try await session.translate(text.japanese)
-                await MainActor.run {
-                    manager.updateTranslation(at: index, with: response.targetText)
+
+                // Check again before updating
+                let stillValid = await MainActor.run { manager.isSessionValid(sessionId) }
+                if stillValid {
+                    await MainActor.run {
+                        manager.updateTranslation(at: index, with: response.targetText)
+                    }
                 }
             }
         } catch {
-            await MainActor.run {
-                manager.errorMessage = "Translation error: \(error.localizedDescription)"
+            let isValid = await MainActor.run { manager.isSessionValid(sessionId) }
+            if isValid {
+                await MainActor.run {
+                    manager.errorMessage = "Translation error: \(error.localizedDescription)"
+                }
             }
         }
 
-        await MainActor.run {
-            manager.finishTranslation()
-            translationConfiguration = nil
+        // Only finish if session is still valid
+        let isValid = await MainActor.run { manager.isSessionValid(sessionId) }
+        if isValid {
+            await MainActor.run {
+                manager.finishTranslation()
+                translationConfiguration = nil
+            }
         }
     }
 
@@ -430,6 +454,9 @@ struct ComicTranslationView: View {
     }
 
     private func clearSelection() {
+        // Cancel any ongoing translation session
+        manager.cancelSession()
+
         selectedImages = []
         pdfPages = []
         currentPageIndex = 0
@@ -466,15 +493,14 @@ struct ComicTranslationView: View {
                 context.cgContext.addPath(backgroundPath.cgPath)
                 context.cgContext.fillPath()
 
-                // Calculate font size
-                let fontSize: CGFloat
-                if isVertical {
-                    let size = min(boxRect.width * 0.8, boxRect.height / max(1, CGFloat(text.translation.count)) * 1.2)
-                    fontSize = max(6, min(size, 14))
-                } else {
-                    let size = boxRect.height * 0.5
-                    fontSize = max(6, min(size, 14))
-                }
+                // Calculate font size that fits the text in the box
+                let textRect = boxRect.insetBy(dx: 4, dy: 4)
+                let fontSize = calculateFittingFontSize(
+                    for: text.translation,
+                    in: textRect,
+                    minSize: 8,
+                    maxSize: 48
+                )
 
                 // Draw text
                 let font = UIFont.boldSystemFont(ofSize: fontSize)
@@ -489,7 +515,6 @@ struct ComicTranslationView: View {
                 ]
 
                 let attributedString = NSAttributedString(string: text.translation, attributes: attributes)
-                let textRect = boxRect.insetBy(dx: 2, dy: 2)
                 attributedString.draw(in: textRect)
             }
         }
@@ -498,6 +523,38 @@ struct ComicTranslationView: View {
         UIImageWriteToSavedPhotosAlbum(overlayedImage, nil, nil, nil)
         saveAlertMessage = "Image saved to Photos"
         showingSaveAlert = true
+    }
+
+    /// Calculate the largest font size that fits the text within the given rect
+    private func calculateFittingFontSize(for text: String, in rect: CGRect, minSize: CGFloat, maxSize: CGFloat) -> CGFloat {
+        var fontSize = maxSize
+
+        while fontSize >= minSize {
+            let font = UIFont.boldSystemFont(ofSize: fontSize)
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            paragraphStyle.lineBreakMode = .byWordWrapping
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .paragraphStyle: paragraphStyle
+            ]
+
+            let boundingRect = (text as NSString).boundingRect(
+                with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: attributes,
+                context: nil
+            )
+
+            if boundingRect.height <= rect.height {
+                return fontSize
+            }
+
+            fontSize -= 1
+        }
+
+        return minSize
     }
 }
 
@@ -509,45 +566,32 @@ struct TranslationOverlayText: View {
     let boxRect: CGRect
 
     var body: some View {
-        if isVertical {
-            // Vertical text overlay
-            Text(translation)
-                .font(.system(size: calculateFontSize()))
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-                .lineLimit(nil)
-                .multilineTextAlignment(.center)
-                .frame(width: boxRect.width, height: boxRect.height)
-                .padding(2)
-                .background(Color.black.opacity(0.9))
-                .cornerRadius(4)
-                .rotationEffect(.degrees(0)) // Keep upright but constrain to vertical box
-        } else {
-            // Horizontal text overlay
-            Text(translation)
-                .font(.system(size: calculateFontSize()))
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-                .lineLimit(nil)
-                .minimumScaleFactor(0.3)
-                .multilineTextAlignment(.center)
-                .frame(width: boxRect.width, height: boxRect.height)
-                .padding(2)
-                .background(Color.black.opacity(0.9))
-                .cornerRadius(4)
-        }
+        Text(translation)
+            .font(.system(size: calculateFontSize()))
+            .fontWeight(.bold)
+            .foregroundColor(.white)
+            .lineLimit(nil)
+            .minimumScaleFactor(0.1)
+            .multilineTextAlignment(.center)
+            .frame(width: boxRect.width - 4, height: boxRect.height - 4)
+            .padding(2)
+            .background(Color.black.opacity(0.9))
+            .cornerRadius(4)
     }
 
     private func calculateFontSize() -> CGFloat {
-        if isVertical {
-            // For vertical boxes, use width as the constraint
-            let size = min(boxRect.width * 0.8, boxRect.height / max(1, CGFloat(translation.count)) * 1.2)
-            return max(6, min(size, 14))
-        } else {
-            // For horizontal boxes, use height as the constraint
-            let size = boxRect.height * 0.5
-            return max(6, min(size, 14))
-        }
+        // Start with a reasonable base font size based on box dimensions
+        // Let minimumScaleFactor handle shrinking to fit
+        let area = boxRect.width * boxRect.height
+        let charCount = max(1, CGFloat(translation.count))
+
+        // Estimate font size based on available area per character
+        // Assuming average character width/height ratio
+        let areaPerChar = area / charCount
+        let estimatedSize = sqrt(areaPerChar) * 0.8
+
+        // Clamp to reasonable range, minimumScaleFactor will shrink if needed
+        return max(8, min(estimatedSize, 24))
     }
 }
 
@@ -583,10 +627,14 @@ struct ExtractedTextRow: View {
                     .font(.body)
                     .foregroundColor(.blue)
             } else {
-                Text("Translating...")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .italic()
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Translating...")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
             }
         }
         .padding()

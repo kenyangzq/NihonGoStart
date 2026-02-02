@@ -8,9 +8,13 @@ class ComicTranslationManager: ObservableObject {
     static let shared = ComicTranslationManager()
 
     @Published var isProcessing = false
+    @Published var isTranslating = false
     @Published var extractedTexts: [ExtractedText] = []
     @Published var errorMessage: String?
     @Published var shouldTriggerTranslation = false
+
+    // Session ID to track current translation session
+    private var currentSessionId: UUID?
 
     // Azure AI Vision credentials from Secrets.swift
     private let azureAPIKey = Secrets.azureAPIKey
@@ -152,8 +156,11 @@ class ComicTranslationManager: ObservableObject {
             }
         }
 
+        // Merge nearby text blocks that likely belong to the same speech bubble
+        let mergedResults = mergeNearbyTextBlocks(results)
+
         // Sort by position (top to bottom, right to left for manga reading order)
-        let sortedResults = results.sorted { a, b in
+        let sortedResults = mergedResults.sorted { a, b in
             if abs(a.boundingBox.midY - b.boundingBox.midY) < 0.05 {
                 return a.boundingBox.midX > b.boundingBox.midX
             }
@@ -163,7 +170,175 @@ class ComicTranslationManager: ObservableObject {
         return sortedResults
     }
 
+    // MARK: - Merge Nearby Text Blocks
+
+    /// Merges text blocks that are close together (likely from the same speech bubble)
+    /// Handles both vertical and horizontal text arrangements in manga
+    private func mergeNearbyTextBlocks(_ texts: [ExtractedText]) -> [ExtractedText] {
+        guard !texts.isEmpty else { return [] }
+
+        // Threshold for considering texts as part of the same bubble
+        let proximityThreshold: CGFloat = 0.06  // 6% of image dimension
+
+        var remaining = texts
+        var merged: [ExtractedText] = []
+
+        while !remaining.isEmpty {
+            var currentGroup = [remaining.removeFirst()]
+
+            // Find all texts that should be merged with this group
+            var foundMore = true
+            while foundMore {
+                foundMore = false
+                var i = 0
+                while i < remaining.count {
+                    let candidate = remaining[i]
+
+                    // Check if candidate should be merged with any text in current group
+                    let shouldMerge = currentGroup.contains { groupText in
+                        isNearby(groupText.boundingBox, candidate.boundingBox,
+                                proximityThreshold: proximityThreshold)
+                    }
+
+                    if shouldMerge {
+                        currentGroup.append(remaining.remove(at: i))
+                        foundMore = true
+                    } else {
+                        i += 1
+                    }
+                }
+            }
+
+            // Merge the group into a single ExtractedText
+            if currentGroup.count == 1 {
+                merged.append(currentGroup[0])
+            } else {
+                // Determine if the group is primarily vertical or horizontal
+                let combinedBox = calculateCombinedBox(for: currentGroup)
+                let isVerticalLayout = combinedBox.height > combinedBox.width
+
+                // Sort group based on layout direction
+                let sortedGroup: [ExtractedText]
+                if isVerticalLayout {
+                    // Vertical layout: sort right to left (Japanese reading order), then top to bottom
+                    sortedGroup = currentGroup.sorted { a, b in
+                        if abs(a.boundingBox.midX - b.boundingBox.midX) < proximityThreshold {
+                            return a.boundingBox.midY < b.boundingBox.midY
+                        }
+                        return a.boundingBox.midX > b.boundingBox.midX
+                    }
+                } else {
+                    // Horizontal layout: sort top to bottom, then left to right
+                    sortedGroup = currentGroup.sorted { a, b in
+                        if abs(a.boundingBox.midY - b.boundingBox.midY) < proximityThreshold {
+                            return a.boundingBox.midX < b.boundingBox.midX
+                        }
+                        return a.boundingBox.midY < b.boundingBox.midY
+                    }
+                }
+
+                // Concatenate text
+                let combinedText = sortedGroup.map { $0.japanese }.joined()
+
+                merged.append(ExtractedText(
+                    japanese: combinedText,
+                    translation: "",
+                    boundingBox: combinedBox
+                ))
+            }
+        }
+
+        return merged
+    }
+
+    /// Calculate combined bounding box for a group of texts
+    private func calculateCombinedBox(for texts: [ExtractedText]) -> CGRect {
+        let minX = texts.map { $0.boundingBox.minX }.min() ?? 0
+        let minY = texts.map { $0.boundingBox.minY }.min() ?? 0
+        let maxX = texts.map { $0.boundingBox.maxX }.max() ?? 0
+        let maxY = texts.map { $0.boundingBox.maxY }.max() ?? 0
+
+        return CGRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        )
+    }
+
+    /// Check if two bounding boxes are nearby in any direction (vertical or horizontal)
+    private func isNearby(_ box1: CGRect, _ box2: CGRect, proximityThreshold: CGFloat) -> Bool {
+        // Check horizontal proximity (boxes are side by side)
+        let horizontallyClose = areHorizontallyAdjacent(box1, box2, threshold: proximityThreshold)
+
+        // Check vertical proximity (boxes are stacked)
+        let verticallyClose = areVerticallyAdjacent(box1, box2, threshold: proximityThreshold)
+
+        return horizontallyClose || verticallyClose
+    }
+
+    /// Check if boxes are horizontally adjacent with vertical overlap
+    private func areHorizontallyAdjacent(_ box1: CGRect, _ box2: CGRect, threshold: CGFloat) -> Bool {
+        // Calculate horizontal gap
+        let horizontalGap: CGFloat
+        if box1.maxX < box2.minX {
+            horizontalGap = box2.minX - box1.maxX
+        } else if box2.maxX < box1.minX {
+            horizontalGap = box1.minX - box2.maxX
+        } else {
+            horizontalGap = 0  // Overlapping horizontally
+        }
+
+        guard horizontalGap < threshold else { return false }
+
+        // Check for vertical overlap (at least 20%)
+        let overlapTop = max(box1.minY, box2.minY)
+        let overlapBottom = min(box1.maxY, box2.maxY)
+        let overlapHeight = max(0, overlapBottom - overlapTop)
+        let minHeight = min(box1.height, box2.height)
+
+        guard minHeight > 0 else { return false }
+        return overlapHeight / minHeight >= 0.2
+    }
+
+    /// Check if boxes are vertically adjacent with horizontal overlap
+    private func areVerticallyAdjacent(_ box1: CGRect, _ box2: CGRect, threshold: CGFloat) -> Bool {
+        // Calculate vertical gap
+        let verticalGap: CGFloat
+        if box1.maxY < box2.minY {
+            verticalGap = box2.minY - box1.maxY
+        } else if box2.maxY < box1.minY {
+            verticalGap = box1.minY - box2.maxY
+        } else {
+            verticalGap = 0  // Overlapping vertically
+        }
+
+        guard verticalGap < threshold else { return false }
+
+        // Check for horizontal overlap (at least 20%)
+        let overlapLeft = max(box1.minX, box2.minX)
+        let overlapRight = min(box1.maxX, box2.maxX)
+        let overlapWidth = max(0, overlapRight - overlapLeft)
+        let minWidth = min(box1.width, box2.width)
+
+        guard minWidth > 0 else { return false }
+        return overlapWidth / minWidth >= 0.2
+    }
+
     // MARK: - Translation (called from view with TranslationSession)
+
+    /// Start a new translation session
+    func startTranslationSession() -> UUID {
+        let sessionId = UUID()
+        currentSessionId = sessionId
+        isTranslating = true
+        return sessionId
+    }
+
+    /// Check if session is still valid (not cancelled)
+    func isSessionValid(_ sessionId: UUID) -> Bool {
+        return currentSessionId == sessionId
+    }
 
     func updateTranslation(at index: Int, with translation: String) {
         guard index < extractedTexts.count else { return }
@@ -176,7 +351,14 @@ class ComicTranslationManager: ObservableObject {
 
     func finishTranslation() {
         isProcessing = false
+        isTranslating = false
         shouldTriggerTranslation = false
+    }
+
+    /// Cancel current session (called when user clears selection)
+    func cancelSession() {
+        currentSessionId = nil
+        isTranslating = false
     }
 
     // MARK: - PDF Extraction

@@ -70,28 +70,22 @@ struct ContentView: View {
             Group {
                 switch selectedMainTab {
                 case .learn:
-                    VStack(spacing: 0) {
-                        // Secondary tab bar for Learn
-                        LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
-
-                        // Learn content
-                        Group {
-                            switch selectedLearnSubTab {
-                            case .kana:
-                                KanaView()
-                            case .kanaPractice:
-                                KanaFlashcardView()
-                            case .vocabulary:
-                                FlashcardView()
-                            case .phrases:
-                                PhrasesView()
-                            case .sentences:
-                                SentencesView()
-                            case .grammar:
-                                GrammarView()
-                            }
+                    // Learn content
+                    Group {
+                        switch selectedLearnSubTab {
+                        case .kana:
+                            KanaView()
+                        case .kanaPractice:
+                            KanaFlashcardView()
+                        case .vocabulary:
+                            FlashcardView()
+                        case .phrases:
+                            PhrasesView()
+                        case .sentences:
+                            SentencesView()
+                        case .grammar:
+                            GrammarView()
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 case .songs:
                     SongsView()
@@ -100,6 +94,11 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Secondary tab bar for Learn (above main tab bar)
+            if selectedMainTab == .learn {
+                LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
+            }
 
             // Main tab bar
             MainTabBar(selectedTab: $selectedMainTab)
