@@ -53,7 +53,11 @@ struct SentencesView: View {
                 .background(Color(UIColor.secondarySystemBackground))
 
                 List(filteredSentences) { sentence in
-                    SentenceRow(sentence: sentence, synthesizer: synthesizer)
+                    SentenceRow(sentence: sentence, synthesizer: synthesizer, onTopicTap: { topic in
+                        withAnimation {
+                            selectedTopic = topic
+                        }
+                    })
                 }
                 .listStyle(.plain)
             }
@@ -97,15 +101,23 @@ struct TopicChip: View {
 struct SentenceRow: View {
     let sentence: Sentence
     let synthesizer: AVSpeechSynthesizer
+    let onTopicTap: (String) -> Void
     @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Topic badge
             HStack {
-                Text(sentence.topic.uppercased())
-                    .font(.caption2)
-                    .fontWeight(.bold)
+                Button(action: {
+                    onTopicTap(sentence.topic)
+                }) {
+                    HStack(spacing: 4) {
+                        Text(sentence.topic.uppercased())
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.caption2)
+                    }
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -113,6 +125,8 @@ struct SentenceRow: View {
                         Capsule()
                             .fill(topicColor(sentence.topic))
                     )
+                }
+                .buttonStyle(PlainButtonStyle())
 
                 Spacer()
 

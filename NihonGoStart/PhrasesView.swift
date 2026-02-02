@@ -39,7 +39,11 @@ struct PhrasesView: View {
                 .background(Color(UIColor.secondarySystemBackground))
 
                 List(filteredPhrases) { phrase in
-                    PhraseRow(phrase: phrase, synthesizer: synthesizer)
+                    PhraseRow(phrase: phrase, synthesizer: synthesizer, onCategoryTap: { category in
+                        withAnimation {
+                            selectedCategory = category
+                        }
+                    })
                 }
                 .listStyle(.plain)
             }
@@ -78,6 +82,7 @@ struct CategoryChip: View {
 struct PhraseRow: View {
     let phrase: Phrase
     let synthesizer: AVSpeechSynthesizer
+    let onCategoryTap: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -109,9 +114,16 @@ struct PhraseRow: View {
                 .font(.body)
                 .foregroundColor(.blue)
 
-            Text(phrase.category.uppercased())
-                .font(.caption2)
-                .fontWeight(.bold)
+            Button(action: {
+                onCategoryTap(phrase.category)
+            }) {
+                HStack(spacing: 4) {
+                    Text(phrase.category.uppercased())
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.caption2)
+                }
                 .foregroundColor(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -119,6 +131,8 @@ struct PhraseRow: View {
                     Capsule()
                         .fill(Color.red.opacity(0.8))
                 )
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(.vertical, 8)
     }
