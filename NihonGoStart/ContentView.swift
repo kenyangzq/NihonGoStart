@@ -111,10 +111,20 @@ struct TabBarButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 20))
+                ZStack {
+                    if isSelected {
+                        Circle()
+                            .fill(Color.red.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                    }
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 20))
+                }
+                .frame(height: 28)
+
                 Text(tab.title)
                     .font(.caption2)
+                    .fontWeight(isSelected ? .semibold : .regular)
             }
             .foregroundColor(isSelected ? .red : .gray)
             .frame(width: 70, height: 49)

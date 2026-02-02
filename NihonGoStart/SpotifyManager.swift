@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 
 class SpotifyManager: ObservableObject {
     static let shared = SpotifyManager()
@@ -55,10 +56,11 @@ class SpotifyManager: ObservableObject {
     // MARK: - Search
 
     func searchJapaneseSongs(query: String) async {
-        guard let token = accessToken else {
+        if accessToken == nil {
             await authenticate()
-            guard accessToken != nil else { return }
         }
+
+        guard accessToken != nil else { return }
 
         await MainActor.run {
             self.isSearching = true

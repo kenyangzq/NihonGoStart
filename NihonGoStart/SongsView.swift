@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UIKit
 
 struct SongsView: View {
     @StateObject private var spotifyManager = SpotifyManager.shared
@@ -144,6 +145,14 @@ struct SongsView: View {
             }
             .navigationTitle("Songs")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                }
+            }
             .sheet(isPresented: $showLyricsView) {
                 if let track = selectedTrack {
                     LyricsView(track: track)
