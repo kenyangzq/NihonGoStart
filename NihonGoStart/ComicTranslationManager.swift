@@ -230,7 +230,8 @@ class ComicTranslationManager: ObservableObject {
         guard !texts.isEmpty else { return [] }
 
         // Threshold for considering texts as part of the same bubble
-        let proximityThreshold: CGFloat = 0.08  // 8% of image dimension
+        // Lower = less aggressive merging, keeps bubbles more separate
+        let proximityThreshold: CGFloat = 0.04  // 4% of image dimension
 
         var remaining = texts
         var merged: [ExtractedText] = []
@@ -503,6 +504,136 @@ class ComicTranslationManager: ObservableObject {
         }
     }
 
+    // MARK: - Claude API Translation (Best Quality)
+
+    /// Translate all texts using Claude API (best quality for manga)
+    func translateWithClaude(to targetLanguage: String) async {
+        guard !extractedTexts.isEmpty else { return }
+
+        // Check if Claude API is configured
+        guard !Secrets.claudeAPIKey.isEmpty else {
+            // Fall back to Azure Translator
+            await translateWithAzure(to: targetLanguage)
+            return
+        }
+
+        isTranslating = true
+        translationProgress = "Translating (Claude)..."
+
+        let sessionId = UUID()
+        currentSessionId = sessionId
+
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+
+        // Build compact prompt - just numbered texts, minimal instructions
+        let textsForTranslation = extractedTexts.enumerated().map { index, text in
+            "\(index + 1).\(text.japanese)"
+        }.joined(separator: "\n")
+
+        let lang = targetLanguage == "en" ? "EN" : "ZH"
+
+        // Minimal prompt to reduce token cost
+        let prompt = "Manga JP→\(lang). Natural, concise. Reply numbered only:\n\(textsForTranslation)"
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(Secrets.claudeAPIKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Estimate max tokens needed (roughly 2x input for safety)
+        let estimatedTokens = min(2048, max(256, extractedTexts.count * 50))
+
+        let requestBody: [String: Any] = [
+            "model": "claude-3-5-haiku-20241022",
+            "max_tokens": estimatedTokens,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard isSessionValid(sessionId) else { return }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                errorMessage = "Invalid response"
+                finishTranslation()
+                return
+            }
+
+            if httpResponse.statusCode != 200 {
+                if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let error = errorJson["error"] as? [String: Any],
+                   let message = error["message"] as? String {
+                    errorMessage = "Claude error: \(message)"
+                } else {
+                    errorMessage = "Claude API error: \(httpResponse.statusCode)"
+                }
+                // Fall back to Azure
+                await translateWithAzure(to: targetLanguage)
+                return
+            }
+
+            // Parse Claude response
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let content = json["content"] as? [[String: Any]],
+                  let firstContent = content.first,
+                  let translatedText = firstContent["text"] as? String else {
+                errorMessage = "Failed to parse Claude response"
+                await translateWithAzure(to: targetLanguage)
+                return
+            }
+
+            // Parse the numbered translations
+            let translations = parseClaudeTranslations(translatedText)
+
+            for (index, translation) in translations.enumerated() {
+                guard index < extractedTexts.count else { break }
+                guard isSessionValid(sessionId) else { return }
+
+                extractedTexts[index] = ExtractedText(
+                    japanese: extractedTexts[index].japanese,
+                    translation: translation,
+                    boundingBox: extractedTexts[index].boundingBox
+                )
+            }
+
+            translationProgress = "Translated \(extractedTexts.count)/\(extractedTexts.count)"
+
+        } catch {
+            guard isSessionValid(sessionId) else { return }
+            errorMessage = "Claude error: \(error.localizedDescription)"
+            // Fall back to Azure
+            await translateWithAzure(to: targetLanguage)
+            return
+        }
+
+        finishTranslation()
+    }
+
+    /// Parse Claude's numbered translation response
+    private func parseClaudeTranslations(_ response: String) -> [String] {
+        var translations: [String] = []
+        let lines = response.components(separatedBy: "\n")
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Match patterns like "[1] translation" or "1. translation" or "1) translation"
+            if let match = trimmed.range(of: #"^\[?\d+[\]\.\)]\s*"#, options: .regularExpression) {
+                let translation = String(trimmed[match.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if !translation.isEmpty {
+                    translations.append(translation)
+                }
+            }
+        }
+
+        return translations
+    }
+
     // MARK: - Azure Translator API
 
     /// Translate all texts using Azure Translator API (batch for speed)
@@ -517,7 +648,7 @@ class ComicTranslationManager: ObservableObject {
         }
 
         isTranslating = true
-        translationProgress = "Translating..."
+        translationProgress = "Translating (Azure)..."
 
         let sessionId = UUID()
         currentSessionId = sessionId
@@ -712,7 +843,7 @@ class ComicTranslationManager: ObservableObject {
         errorMessage = nil
         extractedTexts = []
         shouldTriggerTranslation = false
-        translationProgress = "Extracting text..."
+        translationProgress = "Detecting text regions (Azure)..."
 
         // Step 1: Use Azure AI Vision OCR to get bounding boxes
         let texts = await performAzureOCR(on: image)
@@ -741,7 +872,7 @@ class ComicTranslationManager: ObservableObject {
         // Skip if manga-ocr endpoint is not configured
         guard !Secrets.mangaOCREndpoint.isEmpty else { return texts }
 
-        translationProgress = "Enhancing with manga-ocr..."
+        translationProgress = "Recognizing text (Manga-OCR)..."
 
         // Crop images for each text region
         var croppedImages: [UIImage] = []
@@ -776,7 +907,7 @@ class ComicTranslationManager: ObservableObject {
             }
         }
 
-        translationProgress = "Text extraction complete"
+        translationProgress = "Found \(enhancedTexts.count) text regions"
         return enhancedTexts
     }
 

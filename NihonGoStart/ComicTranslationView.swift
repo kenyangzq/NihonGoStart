@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import Translation
+import Photos
 
 enum TargetLanguage: String, CaseIterable {
     case english = "en"
@@ -29,28 +30,29 @@ struct ComicTranslationView: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var translationConfiguration: TranslationSession.Configuration?
     @State private var targetLanguage: TargetLanguage = .chinese
-    @State private var showOverlay = false
+    @State private var showOverlay = true
     @State private var showingSaveAlert = false
     @State private var saveAlertMessage = ""
+    @State private var isSaving = false
 
     private let speechManager = SpeechManager.shared
     private let maxImageSelection = 9
 
+    var allImages: [UIImage] {
+        if !pdfPages.isEmpty {
+            return pdfPages
+        }
+        return selectedImages
+    }
+
     var currentDisplayImage: UIImage? {
-        if !pdfPages.isEmpty && currentPageIndex < pdfPages.count {
-            return pdfPages[currentPageIndex]
-        }
-        if !selectedImages.isEmpty && currentPageIndex < selectedImages.count {
-            return selectedImages[currentPageIndex]
-        }
-        return nil
+        let images = allImages
+        guard !images.isEmpty && currentPageIndex < images.count else { return nil }
+        return images[currentPageIndex]
     }
 
     var totalPages: Int {
-        if !pdfPages.isEmpty {
-            return pdfPages.count
-        }
-        return selectedImages.count
+        return allImages.count
     }
 
     var body: some View {
@@ -86,7 +88,14 @@ struct ComicTranslationView: View {
         }
         .onChange(of: manager.shouldTriggerTranslation) { _, shouldTranslate in
             if shouldTranslate {
-                triggerTranslation()
+                // Use Claude API if available, then Azure, then Apple Translation
+                Task {
+                    await manager.translateWithClaude(to: targetLanguage.rawValue)
+                    // Update cache after translation
+                    if let image = currentDisplayImage {
+                        manager.updateCache(for: image, isTranslated: true)
+                    }
+                }
             }
         }
         .onChange(of: targetLanguage) { _, _ in
@@ -94,6 +103,10 @@ struct ComicTranslationView: View {
             if !manager.extractedTexts.isEmpty {
                 retranslate()
             }
+        }
+        .onChange(of: currentPageIndex) { _, _ in
+            // When page changes, load the appropriate data
+            switchToCurrentPage()
         }
         .translationTask(translationConfiguration) { session in
             await performTranslation(session: session)
@@ -164,7 +177,7 @@ struct ComicTranslationView: View {
                 // Controls bar
                 controlsBar
 
-                // Image display with optional overlay
+                // Image display with optional overlay and swipe gestures
                 if let image = currentDisplayImage {
                     ZStack {
                         Image(uiImage: image)
@@ -180,21 +193,35 @@ struct ComicTranslationView: View {
                     .cornerRadius(12)
                     .shadow(radius: 4)
                     .padding(.horizontal)
+                    .gesture(
+                        DragGesture(minimumDistance: 50)
+                            .onEnded { value in
+                                handleSwipe(value)
+                            }
+                    )
                 }
 
                 if totalPages > 1 {
                     pageNavigationView
                 }
 
+                // Progress indicators
                 if manager.isProcessing || manager.isTranslating {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 8) {
                         ProgressView()
                             .scaleEffect(1.2)
-                        Text(manager.isProcessing ? "Extracting text..." : "Translating...")
+                        Text(manager.translationProgress.isEmpty ?
+                             (manager.isProcessing ? "Processing..." : "Translating...") :
+                             manager.translationProgress)
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    .padding()
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
+                    .background(Color(.systemBackground).opacity(0.9))
+                    .cornerRadius(12)
+                    .shadow(radius: 4)
                 }
 
                 if let error = manager.errorMessage {
@@ -263,11 +290,17 @@ struct ComicTranslationView: View {
 
                 if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing {
                     Button(action: saveOverlayImage) {
-                        Label("Save", systemImage: "square.and.arrow.down")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                        if isSaving {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Label("Save", systemImage: "square.and.arrow.down")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
                     }
                     .foregroundColor(.red)
+                    .disabled(isSaving)
                 }
             }
             .padding(.horizontal)
@@ -334,6 +367,24 @@ struct ComicTranslationView: View {
         .foregroundColor(.red)
     }
 
+    // MARK: - Swipe Handling
+
+    private func handleSwipe(_ value: DragGesture.Value) {
+        let horizontalAmount = value.translation.width
+        let verticalAmount = value.translation.height
+
+        // Only handle horizontal swipes
+        guard abs(horizontalAmount) > abs(verticalAmount) else { return }
+
+        if horizontalAmount < -50 {
+            // Swipe left - next image
+            nextPage()
+        } else if horizontalAmount > 50 {
+            // Swipe right - previous image
+            previousPage()
+        }
+    }
+
     // MARK: - Translation
 
     private func triggerTranslation() {
@@ -348,8 +399,14 @@ struct ComicTranslationView: View {
         for index in manager.extractedTexts.indices {
             manager.updateTranslation(at: index, with: "")
         }
-        manager.shouldTriggerTranslation = true
-        triggerTranslation()
+
+        // Use Claude API (falls back to Azure, then Apple Translation)
+        Task {
+            await manager.translateWithClaude(to: targetLanguage.rawValue)
+            if let image = currentDisplayImage {
+                manager.updateCache(for: image, isTranslated: true)
+            }
+        }
     }
 
     private func performTranslation(session: TranslationSession) async {
@@ -357,6 +414,9 @@ struct ComicTranslationView: View {
         let sessionId = await MainActor.run {
             manager.startTranslationSession()
         }
+
+        // Capture current image for cache update
+        let currentImage = currentDisplayImage
 
         do {
             for (index, text) in manager.extractedTexts.enumerated() {
@@ -392,6 +452,11 @@ struct ComicTranslationView: View {
             await MainActor.run {
                 manager.finishTranslation()
                 translationConfiguration = nil
+
+                // Update cache with translated results
+                if let image = currentImage {
+                    manager.updateCache(for: image, isTranslated: true)
+                }
             }
         }
     }
@@ -416,20 +481,40 @@ struct ComicTranslationView: View {
             pdfPages = []
             selectedImages = images
             currentPageIndex = 0
+            manager.clearCache()
         }
 
         // Process the first image
         await manager.processImage(images[0])
+
+        // Start background processing for remaining images
+        if images.count > 1 {
+            Task.detached {
+                for i in 1..<images.count {
+                    await manager.processImageInBackground(images[i])
+                }
+            }
+        }
     }
 
     private func handlePDFSelection(_ url: URL) {
         selectedImages = []
         pdfPages = manager.extractPDFPages(from: url)
         currentPageIndex = 0
+        manager.clearCache()
 
         if let firstPage = pdfPages.first {
             Task {
                 await manager.processImage(firstPage)
+
+                // Start background processing for remaining pages
+                if pdfPages.count > 1 {
+                    Task.detached {
+                        for i in 1..<pdfPages.count {
+                            await manager.processImageInBackground(pdfPages[i])
+                        }
+                    }
+                }
             }
         }
     }
@@ -437,17 +522,20 @@ struct ComicTranslationView: View {
     private func previousPage() {
         guard currentPageIndex > 0 else { return }
         currentPageIndex -= 1
-        processCurrentPage()
     }
 
     private func nextPage() {
         guard currentPageIndex < totalPages - 1 else { return }
         currentPageIndex += 1
-        processCurrentPage()
     }
 
-    private func processCurrentPage() {
+    private func switchToCurrentPage() {
         guard let image = currentDisplayImage else { return }
+
+        // Cancel any ongoing translation
+        manager.cancelSession()
+        translationConfiguration = nil
+
         Task {
             await manager.processImage(image)
         }
@@ -463,6 +551,7 @@ struct ComicTranslationView: View {
         selectedPhotoItems = []
         manager.extractedTexts = []
         manager.errorMessage = nil
+        manager.clearCache()
         translationConfiguration = nil
         showOverlay = false
     }
@@ -470,6 +559,23 @@ struct ComicTranslationView: View {
     private func saveOverlayImage() {
         guard let originalImage = currentDisplayImage else { return }
 
+        isSaving = true
+
+        // Request photo library permission
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            DispatchQueue.main.async {
+                if status == .authorized || status == .limited {
+                    self.performSave(originalImage: originalImage)
+                } else {
+                    self.isSaving = false
+                    self.saveAlertMessage = "Please grant photo library access in Settings to save images."
+                    self.showingSaveAlert = true
+                }
+            }
+        }
+    }
+
+    private func performSave(originalImage: UIImage) {
         let imageSize = originalImage.size
         let renderer = UIGraphicsImageRenderer(size: imageSize)
 
@@ -479,7 +585,6 @@ struct ComicTranslationView: View {
 
             // Draw translation overlays
             for text in manager.extractedTexts where !text.translation.isEmpty {
-                let isVertical = isVerticalText(text.boundingBox)
                 let boxRect = CGRect(
                     x: text.boundingBox.minX * imageSize.width,
                     y: text.boundingBox.minY * imageSize.height,
@@ -519,10 +624,20 @@ struct ComicTranslationView: View {
             }
         }
 
-        // Save to photo library
-        UIImageWriteToSavedPhotosAlbum(overlayedImage, nil, nil, nil)
-        saveAlertMessage = "Image saved to Photos"
-        showingSaveAlert = true
+        // Save to photo library using PHPhotoLibrary
+        PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAsset(from: overlayedImage)
+        } completionHandler: { success, error in
+            DispatchQueue.main.async {
+                self.isSaving = false
+                if success {
+                    self.saveAlertMessage = "Image saved to Photos"
+                } else {
+                    self.saveAlertMessage = "Failed to save: \(error?.localizedDescription ?? "Unknown error")"
+                }
+                self.showingSaveAlert = true
+            }
+        }
     }
 
     /// Calculate the largest font size that fits the text within the given rect
