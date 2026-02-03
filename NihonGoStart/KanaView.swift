@@ -29,67 +29,71 @@ struct KanaView: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                Picker("Type", selection: $selectedType) {
-                    ForEach(KanaType.allCases) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding()
+        VStack(spacing: 0) {
+            // Header with title
+            Text(selectedType.displayName)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color(UIColor.systemBackground))
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Basic Section
-                        KanaSectionView(
-                            title: "Basic",
-                            subtitle: "Gojuon (五十音)",
-                            rows: basicRows,
-                            rowLabels: basicRowLabels,
-                            vowels: vowels,
-                            characters: filteredKana.filter { $0.group == .basic },
-                            color: .red
-                        )
-
-                        // Dakuon Section
-                        KanaSectionView(
-                            title: "Dakuon",
-                            subtitle: "濁音 (Voiced)",
-                            rows: dakuonRows,
-                            rowLabels: dakuonRowLabels,
-                            vowels: vowels,
-                            characters: filteredKana.filter { $0.group == .dakuon },
-                            color: .blue
-                        )
-
-                        // Handakuon Section
-                        KanaSectionView(
-                            title: "Handakuon",
-                            subtitle: "半濁音 (Semi-voiced)",
-                            rows: handakuonRows,
-                            rowLabels: handakuonRowLabels,
-                            vowels: vowels,
-                            characters: filteredKana.filter { $0.group == .handakuon },
-                            color: .purple
-                        )
-
-                        // Combo Section
-                        KanaSectionView(
-                            title: "Combo",
-                            subtitle: "拗音 (Contracted)",
-                            rows: comboRows,
-                            rowLabels: comboRowLabels,
-                            vowels: comboVowels,
-                            characters: filteredKana.filter { $0.group == .combo },
-                            color: .orange
-                        )
-                    }
-                    .padding(.vertical)
+            Picker("Type", selection: $selectedType) {
+                ForEach(KanaType.allCases) { type in
+                    Text(type.displayName).tag(type)
                 }
             }
-            .navigationTitle(selectedType.displayName)
-            .navigationBarTitleDisplayMode(.inline)
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Basic Section
+                    KanaSectionView(
+                        title: "Basic",
+                        subtitle: "Gojuon (五十音)",
+                        rows: basicRows,
+                        rowLabels: basicRowLabels,
+                        vowels: vowels,
+                        characters: filteredKana.filter { $0.group == .basic },
+                        color: .red
+                    )
+
+                    // Dakuon Section
+                    KanaSectionView(
+                        title: "Dakuon",
+                        subtitle: "濁音 (Voiced)",
+                        rows: dakuonRows,
+                        rowLabels: dakuonRowLabels,
+                        vowels: vowels,
+                        characters: filteredKana.filter { $0.group == .dakuon },
+                        color: .blue
+                    )
+
+                    // Handakuon Section
+                    KanaSectionView(
+                        title: "Handakuon",
+                        subtitle: "半濁音 (Semi-voiced)",
+                        rows: handakuonRows,
+                        rowLabels: handakuonRowLabels,
+                        vowels: vowels,
+                        characters: filteredKana.filter { $0.group == .handakuon },
+                        color: .purple
+                    )
+
+                    // Combo Section
+                    KanaSectionView(
+                        title: "Combo",
+                        subtitle: "拗音 (Contracted)",
+                        rows: comboRows,
+                        rowLabels: comboRowLabels,
+                        vowels: comboVowels,
+                        characters: filteredKana.filter { $0.group == .combo },
+                        color: .orange
+                    )
+                }
+                .padding(.vertical)
+            }
         }
     }
 }

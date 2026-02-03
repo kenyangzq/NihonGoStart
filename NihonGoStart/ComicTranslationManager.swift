@@ -8,7 +8,10 @@ struct ImageTranslationCache {
     let imageHash: Int
     var extractedTexts: [ExtractedText]
     var isProcessed: Bool
-    var isTranslated: Bool
+    var translatedLanguages: Set<String>  // Track which languages have been translated
+
+    // Store translations per language
+    var translationsByLanguage: [String: [String]]  // language code -> translations array
 }
 
 // Response from manga-ocr server
@@ -32,6 +35,13 @@ class ComicTranslationManager: ObservableObject {
 
     // Session ID to track current translation session
     private var currentSessionId: UUID?
+
+    // Session persistence - stores state when switching views
+    @Published var sessionImages: [UIImage] = []
+    @Published var sessionPDFPages: [UIImage] = []
+    @Published var sessionCurrentPageIndex: Int = 0
+    @Published var sessionTargetLanguage: String = "zh-Hans"
+    @Published var sessionShowOverlay: Bool = true
 
     // Azure AI Vision credentials from Secrets.swift
     private let azureAPIKey = Secrets.azureAPIKey
@@ -63,14 +73,63 @@ class ComicTranslationManager: ObservableObject {
         return translationCache[hash]?.extractedTexts
     }
 
-    /// Check if translation is complete for image
-    func isTranslationComplete(for image: UIImage) -> Bool {
+    /// Check if translation is complete for image in specific language
+    func isTranslationComplete(for image: UIImage, language: String) -> Bool {
         let hash = hashForImage(image)
-        return translationCache[hash]?.isTranslated == true
+        return translationCache[hash]?.translatedLanguages.contains(language) == true
+    }
+
+    /// Get cached translations for a specific language
+    func getCachedTranslations(for image: UIImage, language: String) -> [String]? {
+        let hash = hashForImage(image)
+        return translationCache[hash]?.translationsByLanguage[language]
+    }
+
+    /// Load cached translations for a language into extractedTexts
+    func loadCachedTranslations(for image: UIImage, language: String) -> Bool {
+        let hash = hashForImage(image)
+        guard let cache = translationCache[hash],
+              let translations = cache.translationsByLanguage[language],
+              translations.count == cache.extractedTexts.count else {
+            return false
+        }
+
+        // Apply cached translations
+        extractedTexts = cache.extractedTexts.enumerated().map { index, text in
+            ExtractedText(
+                japanese: text.japanese,
+                translation: translations[index],
+                boundingBox: text.boundingBox
+            )
+        }
+        return true
+    }
+
+    /// Save translations to cache for a specific language
+    func cacheTranslations(for image: UIImage, language: String) {
+        let hash = hashForImage(image)
+        guard var cache = translationCache[hash] else { return }
+
+        let translations = extractedTexts.map { $0.translation }
+        cache.translationsByLanguage[language] = translations
+        cache.translatedLanguages.insert(language)
+        translationCache[hash] = cache
     }
 
     /// Clear all cached results
     func clearCache() {
+        translationCache.removeAll()
+    }
+
+    /// Clear all session data (for full reset)
+    func clearSession() {
+        sessionImages = []
+        sessionPDFPages = []
+        sessionCurrentPageIndex = 0
+        sessionTargetLanguage = "zh-Hans"
+        sessionShowOverlay = true
+        extractedTexts = []
+        errorMessage = nil
         translationCache.removeAll()
     }
 
@@ -504,26 +563,26 @@ class ComicTranslationManager: ObservableObject {
         }
     }
 
-    // MARK: - Claude API Translation (Best Quality)
+    // MARK: - Gemini API Translation (Best Quality)
 
-    /// Translate all texts using Claude API (best quality for manga)
-    func translateWithClaude(to targetLanguage: String) async {
+    /// Translate all texts using Gemini API (best quality for manga)
+    func translateWithGemini(to targetLanguage: String) async {
         guard !extractedTexts.isEmpty else { return }
 
-        // Check if Claude API is configured
-        guard !Secrets.claudeAPIKey.isEmpty else {
+        // Check if Gemini API is configured
+        guard !Secrets.geminiAPIKey.isEmpty else {
             // Fall back to Azure Translator
             await translateWithAzure(to: targetLanguage)
             return
         }
 
         isTranslating = true
-        translationProgress = "Translating (Claude)..."
+        translationProgress = "Translating (Gemini)..."
 
         let sessionId = UUID()
         currentSessionId = sessionId
 
-        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=\(Secrets.geminiAPIKey)")!
 
         // Build compact prompt - just numbered texts, minimal instructions
         let textsForTranslation = extractedTexts.enumerated().map { index, text in
@@ -537,18 +596,19 @@ class ComicTranslationManager: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(Secrets.claudeAPIKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Estimate max tokens needed (roughly 2x input for safety)
-        let estimatedTokens = min(2048, max(256, extractedTexts.count * 50))
-
         let requestBody: [String: Any] = [
-            "model": "claude-3-5-haiku-20241022",
-            "max_tokens": estimatedTokens,
-            "messages": [
-                ["role": "user", "content": prompt]
+            "contents": [
+                [
+                    "parts": [
+                        ["text": prompt]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "temperature": 0.3,
+                "maxOutputTokens": min(2048, max(256, extractedTexts.count * 50))
             ]
         ]
 
@@ -569,27 +629,30 @@ class ComicTranslationManager: ObservableObject {
                 if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let error = errorJson["error"] as? [String: Any],
                    let message = error["message"] as? String {
-                    errorMessage = "Claude error: \(message)"
+                    errorMessage = "Gemini error: \(message)"
                 } else {
-                    errorMessage = "Claude API error: \(httpResponse.statusCode)"
+                    errorMessage = "Gemini API error: \(httpResponse.statusCode)"
                 }
                 // Fall back to Azure
                 await translateWithAzure(to: targetLanguage)
                 return
             }
 
-            // Parse Claude response
+            // Parse Gemini response
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let content = json["content"] as? [[String: Any]],
-                  let firstContent = content.first,
-                  let translatedText = firstContent["text"] as? String else {
-                errorMessage = "Failed to parse Claude response"
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let firstPart = parts.first,
+                  let translatedText = firstPart["text"] as? String else {
+                errorMessage = "Failed to parse Gemini response"
                 await translateWithAzure(to: targetLanguage)
                 return
             }
 
             // Parse the numbered translations
-            let translations = parseClaudeTranslations(translatedText)
+            let translations = parseNumberedTranslations(translatedText)
 
             for (index, translation) in translations.enumerated() {
                 guard index < extractedTexts.count else { break }
@@ -606,7 +669,7 @@ class ComicTranslationManager: ObservableObject {
 
         } catch {
             guard isSessionValid(sessionId) else { return }
-            errorMessage = "Claude error: \(error.localizedDescription)"
+            errorMessage = "Gemini error: \(error.localizedDescription)"
             // Fall back to Azure
             await translateWithAzure(to: targetLanguage)
             return
@@ -615,8 +678,8 @@ class ComicTranslationManager: ObservableObject {
         finishTranslation()
     }
 
-    /// Parse Claude's numbered translation response
-    private func parseClaudeTranslations(_ response: String) -> [String] {
+    /// Parse numbered translation response (works for both Claude and Gemini)
+    private func parseNumberedTranslations(_ response: String) -> [String] {
         var translations: [String] = []
         let lines = response.components(separatedBy: "\n")
 
@@ -772,25 +835,60 @@ class ComicTranslationManager: ObservableObject {
     }
 
     /// Update cache with current results for an image
-    func updateCache(for image: UIImage, isTranslated: Bool) {
+    func updateCache(for image: UIImage, language: String? = nil) {
         let hash = hashForImage(image)
-        translationCache[hash] = ImageTranslationCache(
+
+        // Get existing cache or create new one
+        var cache = translationCache[hash] ?? ImageTranslationCache(
             imageHash: hash,
             extractedTexts: extractedTexts,
             isProcessed: true,
-            isTranslated: isTranslated
+            translatedLanguages: [],
+            translationsByLanguage: [:]
         )
+
+        // Update extracted texts (OCR results)
+        cache.extractedTexts = extractedTexts.map { text in
+            // Store without translations for base cache
+            ExtractedText(japanese: text.japanese, translation: "", boundingBox: text.boundingBox)
+        }
+        cache.isProcessed = true
+
+        // If language provided, cache the translations
+        if let lang = language {
+            let translations = extractedTexts.map { $0.translation }
+            cache.translationsByLanguage[lang] = translations
+            cache.translatedLanguages.insert(lang)
+        }
+
+        translationCache[hash] = cache
     }
 
     /// Load cached results into current state
-    func loadFromCache(for image: UIImage) -> Bool {
+    func loadFromCache(for image: UIImage, language: String? = nil) -> Bool {
         let hash = hashForImage(image)
-        guard let cached = translationCache[hash] else { return false }
+        guard let cached = translationCache[hash], cached.isProcessed else { return false }
 
+        // Load base extracted texts
         extractedTexts = cached.extractedTexts
+
+        // If language specified and we have cached translations, apply them
+        if let lang = language, let translations = cached.translationsByLanguage[lang] {
+            for (index, translation) in translations.enumerated() where index < extractedTexts.count {
+                extractedTexts[index] = ExtractedText(
+                    japanese: extractedTexts[index].japanese,
+                    translation: translation,
+                    boundingBox: extractedTexts[index].boundingBox
+                )
+            }
+            shouldTriggerTranslation = false
+        } else {
+            // Need to translate
+            shouldTriggerTranslation = !cached.extractedTexts.isEmpty
+        }
+
         isProcessing = false
         isTranslating = false
-        shouldTriggerTranslation = !cached.isTranslated && !cached.extractedTexts.isEmpty
         return true
     }
 
@@ -864,7 +962,7 @@ class ComicTranslationManager: ObservableObject {
         shouldTriggerTranslation = true
 
         // Cache the OCR results (not yet translated)
-        updateCache(for: image, isTranslated: false)
+        updateCache(for: image)
     }
 
     /// Enhance Azure OCR results with manga-ocr for better text recognition
@@ -931,7 +1029,8 @@ class ComicTranslationManager: ObservableObject {
                     imageHash: hash,
                     extractedTexts: enhancedTexts,
                     isProcessed: true,
-                    isTranslated: false
+                    translatedLanguages: [],
+                    translationsByLanguage: [:]
                 )
             }
         }

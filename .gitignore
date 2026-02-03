@@ -30,3 +30,6 @@ Carthage/Build
 
 # Secrets
 Secrets.swift
+
+# Claude memory files
+.claude/
