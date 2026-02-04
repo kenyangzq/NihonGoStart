@@ -19,6 +19,42 @@ struct MangaOCRResponse: Codable {
     let text: String
 }
 
+// MARK: - Saved Session Model
+
+/// Represents a saved comic translation session
+struct SavedComicSession: Codable, Identifiable {
+    let id: UUID
+    let createdAt: Date
+    var lastAccessedAt: Date
+    let imageCount: Int
+    let targetLanguage: String
+    var thumbnailData: Data?  // First image thumbnail for preview
+
+    // File paths for images (stored separately due to size)
+    var imageFileNames: [String]
+
+    var displayDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: lastAccessedAt)
+    }
+}
+
+/// Codable version of ExtractedText for persistence
+struct SavedExtractedText: Codable {
+    let japanese: String
+    let translation: String
+    let boundingBox: CGRect
+}
+
+/// Codable cache entry for persistence
+struct SavedImageCache: Codable {
+    let imageIndex: Int
+    var extractedTexts: [SavedExtractedText]
+    var translationsByLanguage: [String: [String]]
+}
+
 @MainActor
 class ComicTranslationManager: ObservableObject {
     static let shared = ComicTranslationManager()
@@ -43,11 +79,237 @@ class ComicTranslationManager: ObservableObject {
     @Published var sessionTargetLanguage: String = "zh-Hans"
     @Published var sessionShowOverlay: Bool = true
 
+    // Saved sessions list
+    @Published var savedSessions: [SavedComicSession] = []
+    private var currentSavedSessionId: UUID?  // Track if we're viewing a saved session
+
     // Azure AI Vision credentials from Secrets.swift
     private let azureAPIKey = Secrets.azureAPIKey
     private let azureEndpoint = Secrets.azureEndpoint
 
-    private init() {}
+    // File paths for session storage
+    private var sessionsDirectory: URL {
+        let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        let sessionsDir = paths[0].appendingPathComponent("ComicSessions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+        return sessionsDir
+    }
+
+    private var sessionsIndexURL: URL {
+        sessionsDirectory.appendingPathComponent("sessions_index.json")
+    }
+
+    private init() {
+        loadSavedSessionsList()
+    }
+
+    // MARK: - Session Persistence
+
+    /// Load the list of saved sessions from disk
+    func loadSavedSessionsList() {
+        guard FileManager.default.fileExists(atPath: sessionsIndexURL.path) else {
+            savedSessions = []
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: sessionsIndexURL)
+            savedSessions = try JSONDecoder().decode([SavedComicSession].self, from: data)
+            // Sort by last accessed, most recent first
+            savedSessions.sort { $0.lastAccessedAt > $1.lastAccessedAt }
+        } catch {
+            print("Failed to load sessions index: \(error)")
+            savedSessions = []
+        }
+    }
+
+    /// Save the sessions index to disk
+    private func saveSessionsIndex() {
+        do {
+            let data = try JSONEncoder().encode(savedSessions)
+            try data.write(to: sessionsIndexURL)
+        } catch {
+            print("Failed to save sessions index: \(error)")
+        }
+    }
+
+    /// Save the current session to disk
+    func saveCurrentSession() {
+        let images = !sessionPDFPages.isEmpty ? sessionPDFPages : sessionImages
+        guard !images.isEmpty else { return }
+
+        // Always create a new session ID for new sessions
+        let sessionId = currentSavedSessionId ?? UUID()
+        let sessionDir = sessionsDirectory.appendingPathComponent(sessionId.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        // Save images
+        var imageFileNames: [String] = []
+        for (index, image) in images.enumerated() {
+            let fileName = "image_\(index).jpg"
+            let fileURL = sessionDir.appendingPathComponent(fileName)
+            if let data = image.jpegData(compressionQuality: 0.8) {
+                try? data.write(to: fileURL)
+                imageFileNames.append(fileName)
+            }
+        }
+
+        // Save translation cache for each image
+        var savedCaches: [SavedImageCache] = []
+        for (index, image) in images.enumerated() {
+            let hash = hashForImage(image)
+            if let cache = translationCache[hash] {
+                let savedTexts = cache.extractedTexts.map { text in
+                    SavedExtractedText(
+                        japanese: text.japanese,
+                        translation: text.translation,
+                        boundingBox: text.boundingBox
+                    )
+                }
+                let savedCache = SavedImageCache(
+                    imageIndex: index,
+                    extractedTexts: savedTexts,
+                    translationsByLanguage: cache.translationsByLanguage
+                )
+                savedCaches.append(savedCache)
+            }
+        }
+
+        // Write cache to file
+        let cacheURL = sessionDir.appendingPathComponent("translation_cache.json")
+        if let cacheData = try? JSONEncoder().encode(savedCaches) {
+            try? cacheData.write(to: cacheURL)
+        }
+
+        // Create thumbnail from first image
+        var thumbnailData: Data?
+        if let firstImage = images.first {
+            let thumbnailSize = CGSize(width: 100, height: 150)
+            let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
+            let thumbnail = renderer.image { _ in
+                firstImage.draw(in: CGRect(origin: .zero, size: thumbnailSize))
+            }
+            thumbnailData = thumbnail.jpegData(compressionQuality: 0.6)
+        }
+
+        // Update or create session entry
+        if let existingIndex = savedSessions.firstIndex(where: { $0.id == sessionId }) {
+            savedSessions[existingIndex].lastAccessedAt = Date()
+            savedSessions[existingIndex].imageFileNames = imageFileNames
+            savedSessions[existingIndex].thumbnailData = thumbnailData
+        } else {
+            let newSession = SavedComicSession(
+                id: sessionId,
+                createdAt: Date(),
+                lastAccessedAt: Date(),
+                imageCount: images.count,
+                targetLanguage: sessionTargetLanguage,
+                thumbnailData: thumbnailData,
+                imageFileNames: imageFileNames
+            )
+            savedSessions.insert(newSession, at: 0)
+        }
+
+        currentSavedSessionId = sessionId
+        saveSessionsIndex()
+    }
+
+    /// Load a saved session
+    func loadSavedSession(_ session: SavedComicSession) {
+        let sessionDir = sessionsDirectory.appendingPathComponent(session.id.uuidString, isDirectory: true)
+
+        var loadedImages: [UIImage] = []
+        for fileName in session.imageFileNames {
+            let fileURL = sessionDir.appendingPathComponent(fileName)
+            if let data = try? Data(contentsOf: fileURL),
+               let image = UIImage(data: data) {
+                loadedImages.append(image)
+            }
+        }
+
+        guard !loadedImages.isEmpty else {
+            errorMessage = "Failed to load session images"
+            return
+        }
+
+        // Update last accessed
+        if let index = savedSessions.firstIndex(where: { $0.id == session.id }) {
+            savedSessions[index].lastAccessedAt = Date()
+            saveSessionsIndex()
+        }
+
+        // Set session state
+        currentSavedSessionId = session.id
+        sessionImages = loadedImages
+        sessionPDFPages = []
+        sessionCurrentPageIndex = 0
+        sessionTargetLanguage = session.targetLanguage
+        sessionShowOverlay = true
+
+        // Clear existing cache before loading saved cache
+        translationCache.removeAll()
+
+        // Load translation cache from disk
+        let cacheURL = sessionDir.appendingPathComponent("translation_cache.json")
+        if let cacheData = try? Data(contentsOf: cacheURL),
+           let savedCaches = try? JSONDecoder().decode([SavedImageCache].self, from: cacheData) {
+
+            for savedCache in savedCaches {
+                guard savedCache.imageIndex < loadedImages.count else { continue }
+                let image = loadedImages[savedCache.imageIndex]
+                // Compute hash from the LOADED image (this is what will be used for cache lookup)
+                let hash = hashForImage(image)
+
+                // Build extractedTexts - apply translations from the saved language if available
+                var extractedTexts = savedCache.extractedTexts.map { saved in
+                    ExtractedText(
+                        japanese: saved.japanese,
+                        translation: saved.translation,
+                        boundingBox: saved.boundingBox
+                    )
+                }
+
+                // If we have translations stored, apply them to extractedTexts for the session's language
+                if let translations = savedCache.translationsByLanguage[session.targetLanguage] {
+                    for (index, translation) in translations.enumerated() where index < extractedTexts.count {
+                        extractedTexts[index] = ExtractedText(
+                            japanese: extractedTexts[index].japanese,
+                            translation: translation,
+                            boundingBox: extractedTexts[index].boundingBox
+                        )
+                    }
+                }
+
+                translationCache[hash] = ImageTranslationCache(
+                    imageHash: hash,
+                    extractedTexts: extractedTexts,
+                    isProcessed: true,
+                    translatedLanguages: Set(savedCache.translationsByLanguage.keys),
+                    translationsByLanguage: savedCache.translationsByLanguage
+                )
+            }
+        }
+    }
+
+    /// Delete a saved session
+    func deleteSavedSession(_ session: SavedComicSession) {
+        let sessionDir = sessionsDirectory.appendingPathComponent(session.id.uuidString, isDirectory: true)
+        try? FileManager.default.removeItem(at: sessionDir)
+
+        savedSessions.removeAll { $0.id == session.id }
+        saveSessionsIndex()
+
+        // If we deleted the current session, clear it
+        if currentSavedSessionId == session.id {
+            currentSavedSessionId = nil
+        }
+    }
+
+    /// Get thumbnail image for a session
+    func getThumbnail(for session: SavedComicSession) -> UIImage? {
+        guard let data = session.thumbnailData else { return nil }
+        return UIImage(data: data)
+    }
 
     // MARK: - Cache Management
 
@@ -113,12 +375,49 @@ class ComicTranslationManager: ObservableObject {
         let translations = extractedTexts.map { $0.translation }
         cache.translationsByLanguage[language] = translations
         cache.translatedLanguages.insert(language)
+
+        // Also update extractedTexts in the cache so translations persist when saved to disk
+        cache.extractedTexts = extractedTexts
         translationCache[hash] = cache
+    }
+
+    /// Clear translation for a specific language (for retry functionality)
+    func clearTranslationForCurrentLanguage(for image: UIImage, language: String) {
+        let hash = hashForImage(image)
+        guard var cache = translationCache[hash] else { return }
+
+        cache.translationsByLanguage.removeValue(forKey: language)
+        cache.translatedLanguages.remove(language)
+
+        // Clear translations from extractedTexts
+        cache.extractedTexts = cache.extractedTexts.map { text in
+            ExtractedText(
+                japanese: text.japanese,
+                translation: "",
+                boundingBox: text.boundingBox
+            )
+        }
+
+        translationCache[hash] = cache
+
+        // Also clear current extractedTexts translations
+        extractedTexts = extractedTexts.map { text in
+            ExtractedText(
+                japanese: text.japanese,
+                translation: "",
+                boundingBox: text.boundingBox
+            )
+        }
     }
 
     /// Clear all cached results
     func clearCache() {
         translationCache.removeAll()
+    }
+
+    /// Reset the saved session ID (call when starting a fresh session)
+    func resetSavedSessionId() {
+        currentSavedSessionId = nil
     }
 
     /// Clear all session data (for full reset)
@@ -131,6 +430,7 @@ class ComicTranslationManager: ObservableObject {
         extractedTexts = []
         errorMessage = nil
         translationCache.removeAll()
+        currentSavedSessionId = nil
     }
 
     // MARK: - Azure AI Vision OCR
@@ -563,19 +863,128 @@ class ComicTranslationManager: ObservableObject {
         }
     }
 
-    // MARK: - Gemini API Translation (Best Quality)
+    // MARK: - AI Translation (Azure OpenAI preferred, Gemini fallback)
 
-    /// Translate all texts using Gemini API (best quality for manga)
+    /// Translate all texts using AI - tries Azure OpenAI first, then Gemini, then Azure Translator
     func translateWithGemini(to targetLanguage: String) async {
         guard !extractedTexts.isEmpty else { return }
 
-        // Check if Gemini API is configured
-        guard !Secrets.geminiAPIKey.isEmpty else {
-            // Fall back to Azure Translator
-            await translateWithAzure(to: targetLanguage)
-            return
+        // Try Azure OpenAI first (preferred)
+        if !Secrets.azureOpenAIEndpoint.isEmpty && !Secrets.azureOpenAIKey.isEmpty {
+            let success = await translateWithAzureOpenAI(to: targetLanguage)
+            if success { return }
         }
 
+        // Fall back to Gemini if configured
+        if !Secrets.geminiAPIKey.isEmpty {
+            let success = await translateWithGeminiAPI(to: targetLanguage)
+            if success { return }
+        }
+
+        // Final fallback to Azure Translator
+        await translateWithAzure(to: targetLanguage)
+    }
+
+    // MARK: - Azure OpenAI Translation
+
+    /// Translate using Azure OpenAI (GPT-4o-mini or similar)
+    private func translateWithAzureOpenAI(to targetLanguage: String) async -> Bool {
+        isTranslating = true
+        translationProgress = "Translating (Azure OpenAI)..."
+
+        let sessionId = UUID()
+        currentSessionId = sessionId
+
+        // Build the endpoint URL
+        let urlString = "\(Secrets.azureOpenAIEndpoint)openai/deployments/\(Secrets.azureOpenAIDeployment)/chat/completions?api-version=2025-01-01-preview"
+        guard let url = URL(string: urlString) else {
+            errorMessage = "Invalid Azure OpenAI endpoint"
+            return false
+        }
+
+        // Build compact prompt
+        let textsForTranslation = extractedTexts.enumerated().map { index, text in
+            "\(index + 1).\(text.japanese)"
+        }.joined(separator: "\n")
+
+        let lang = targetLanguage == "en" ? "English" : "Chinese"
+
+        let systemPrompt = "You are a manga translator. Translate Japanese to \(lang). Be natural and concise. Reply with numbered translations only, matching the input format."
+        let userPrompt = textsForTranslation
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(Secrets.azureOpenAIKey, forHTTPHeaderField: "api-key")
+
+        let requestBody: [String: Any] = [
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userPrompt]
+            ],
+            "temperature": 0.3,
+            "max_tokens": min(2048, max(256, extractedTexts.count * 50))
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard isSessionValid(sessionId) else { return false }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                errorMessage = "Invalid response"
+                return false
+            }
+
+            if httpResponse.statusCode != 200 {
+                if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let error = errorJson["error"] as? [String: Any],
+                   let message = error["message"] as? String {
+                    print("Azure OpenAI error: \(message)")
+                }
+                return false
+            }
+
+            // Parse Azure OpenAI response
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let firstChoice = choices.first,
+                  let message = firstChoice["message"] as? [String: Any],
+                  let translatedText = message["content"] as? String else {
+                return false
+            }
+
+            // Parse the numbered translations
+            let translations = parseNumberedTranslations(translatedText)
+
+            for (index, translation) in translations.enumerated() {
+                guard index < extractedTexts.count else { break }
+                guard isSessionValid(sessionId) else { return false }
+
+                extractedTexts[index] = ExtractedText(
+                    japanese: extractedTexts[index].japanese,
+                    translation: translation,
+                    boundingBox: extractedTexts[index].boundingBox
+                )
+            }
+
+            translationProgress = "Translated \(extractedTexts.count)/\(extractedTexts.count)"
+            finishTranslation()
+            return true
+
+        } catch {
+            guard isSessionValid(sessionId) else { return false }
+            print("Azure OpenAI error: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    // MARK: - Gemini API Translation (Fallback)
+
+    /// Translate using Gemini API
+    private func translateWithGeminiAPI(to targetLanguage: String) async -> Bool {
         isTranslating = true
         translationProgress = "Translating (Gemini)..."
 
@@ -584,14 +993,12 @@ class ComicTranslationManager: ObservableObject {
 
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=\(Secrets.geminiAPIKey)")!
 
-        // Build compact prompt - just numbered texts, minimal instructions
+        // Build compact prompt
         let textsForTranslation = extractedTexts.enumerated().map { index, text in
             "\(index + 1).\(text.japanese)"
         }.joined(separator: "\n")
 
         let lang = targetLanguage == "en" ? "EN" : "ZH"
-
-        // Minimal prompt to reduce token cost
         let prompt = "Manga JP→\(lang). Natural, concise. Reply numbered only:\n\(textsForTranslation)"
 
         var request = URLRequest(url: url)
@@ -617,25 +1024,19 @@ class ComicTranslationManager: ObservableObject {
 
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard isSessionValid(sessionId) else { return }
+            guard isSessionValid(sessionId) else { return false }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                errorMessage = "Invalid response"
-                finishTranslation()
-                return
+                return false
             }
 
             if httpResponse.statusCode != 200 {
                 if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let error = errorJson["error"] as? [String: Any],
                    let message = error["message"] as? String {
-                    errorMessage = "Gemini error: \(message)"
-                } else {
-                    errorMessage = "Gemini API error: \(httpResponse.statusCode)"
+                    print("Gemini error: \(message)")
                 }
-                // Fall back to Azure
-                await translateWithAzure(to: targetLanguage)
-                return
+                return false
             }
 
             // Parse Gemini response
@@ -646,9 +1047,7 @@ class ComicTranslationManager: ObservableObject {
                   let parts = content["parts"] as? [[String: Any]],
                   let firstPart = parts.first,
                   let translatedText = firstPart["text"] as? String else {
-                errorMessage = "Failed to parse Gemini response"
-                await translateWithAzure(to: targetLanguage)
-                return
+                return false
             }
 
             // Parse the numbered translations
@@ -656,7 +1055,7 @@ class ComicTranslationManager: ObservableObject {
 
             for (index, translation) in translations.enumerated() {
                 guard index < extractedTexts.count else { break }
-                guard isSessionValid(sessionId) else { return }
+                guard isSessionValid(sessionId) else { return false }
 
                 extractedTexts[index] = ExtractedText(
                     japanese: extractedTexts[index].japanese,
@@ -666,16 +1065,14 @@ class ComicTranslationManager: ObservableObject {
             }
 
             translationProgress = "Translated \(extractedTexts.count)/\(extractedTexts.count)"
+            finishTranslation()
+            return true
 
         } catch {
-            guard isSessionValid(sessionId) else { return }
-            errorMessage = "Gemini error: \(error.localizedDescription)"
-            // Fall back to Azure
-            await translateWithAzure(to: targetLanguage)
-            return
+            guard isSessionValid(sessionId) else { return false }
+            print("Gemini error: \(error.localizedDescription)")
+            return false
         }
-
-        finishTranslation()
     }
 
     /// Parse numbered translation response (works for both Claude and Gemini)
@@ -889,6 +1286,7 @@ class ComicTranslationManager: ObservableObject {
 
         isProcessing = false
         isTranslating = false
+        translationProgress = ""  // Clear progress when loading from cache
         return true
     }
 
@@ -931,9 +1329,10 @@ class ComicTranslationManager: ObservableObject {
 
     // MARK: - Process Image
 
-    func processImage(_ image: UIImage) async {
-        // Check cache first
-        if loadFromCache(for: image) {
+    func processImage(_ image: UIImage, language: String? = nil) async {
+        // Check cache first - pass language to load translations if available
+        let lang = language ?? sessionTargetLanguage
+        if loadFromCache(for: image, language: lang) {
             return
         }
 
@@ -1033,6 +1432,201 @@ class ComicTranslationManager: ObservableObject {
                     translationsByLanguage: [:]
                 )
             }
+        }
+    }
+
+    /// Process image AND translate in background (full pre-loading)
+    func processAndTranslateInBackground(_ image: UIImage, language: String) async {
+        let hash = hashForImage(image)
+
+        // Check if already fully cached with translation
+        if let cache = translationCache[hash],
+           cache.isProcessed,
+           cache.translatedLanguages.contains(language) {
+            return
+        }
+
+        // Step 1: OCR if needed
+        if !hasCachedResults(for: image) {
+            let texts = await performAzureOCR(on: image)
+            if !texts.isEmpty {
+                let enhancedTexts = await enhanceWithMangaOCRBackground(texts, originalImage: image)
+                await MainActor.run {
+                    translationCache[hash] = ImageTranslationCache(
+                        imageHash: hash,
+                        extractedTexts: enhancedTexts,
+                        isProcessed: true,
+                        translatedLanguages: [],
+                        translationsByLanguage: [:]
+                    )
+                }
+            }
+        }
+
+        // Step 2: Translate in background
+        guard let cache = translationCache[hash], !cache.extractedTexts.isEmpty else { return }
+
+        // Skip if already translated for this language
+        if cache.translatedLanguages.contains(language) { return }
+
+        let translations = await translateTextsInBackground(cache.extractedTexts, to: language)
+
+        // Cache the translations
+        await MainActor.run {
+            if var updatedCache = translationCache[hash] {
+                updatedCache.translationsByLanguage[language] = translations
+                updatedCache.translatedLanguages.insert(language)
+
+                // Also update extractedTexts with translations so they persist when saved
+                var updatedTexts = updatedCache.extractedTexts
+                for (index, translation) in translations.enumerated() where index < updatedTexts.count {
+                    updatedTexts[index] = ExtractedText(
+                        japanese: updatedTexts[index].japanese,
+                        translation: translation,
+                        boundingBox: updatedTexts[index].boundingBox
+                    )
+                }
+                updatedCache.extractedTexts = updatedTexts
+
+                translationCache[hash] = updatedCache
+            }
+        }
+    }
+
+    /// Translate texts in background without updating UI
+    private func translateTextsInBackground(_ texts: [ExtractedText], to targetLanguage: String) async -> [String] {
+        // Try Azure OpenAI first
+        if !Secrets.azureOpenAIEndpoint.isEmpty && !Secrets.azureOpenAIKey.isEmpty {
+            if let translations = await translateTextsWithAzureOpenAI(texts, to: targetLanguage) {
+                return translations
+            }
+        }
+
+        // Fall back to Gemini
+        if !Secrets.geminiAPIKey.isEmpty {
+            if let translations = await translateTextsWithGemini(texts, to: targetLanguage) {
+                return translations
+            }
+        }
+
+        // Fall back to Azure Translator
+        if let translations = await translateTextsWithAzureTranslator(texts, to: targetLanguage) {
+            return translations
+        }
+
+        return Array(repeating: "", count: texts.count)
+    }
+
+    /// Background translation using Azure OpenAI (no UI updates)
+    private func translateTextsWithAzureOpenAI(_ texts: [ExtractedText], to targetLanguage: String) async -> [String]? {
+        let urlString = "\(Secrets.azureOpenAIEndpoint)openai/deployments/\(Secrets.azureOpenAIDeployment)/chat/completions?api-version=2025-01-01-preview"
+        guard let url = URL(string: urlString) else { return nil }
+
+        let textsForTranslation = texts.enumerated().map { "\($0.offset + 1).\($0.element.japanese)" }.joined(separator: "\n")
+        let lang = targetLanguage == "en" ? "English" : "Chinese"
+
+        let systemPrompt = "You are a manga translator. Translate Japanese to \(lang). Be natural and concise. Reply with numbered translations only, matching the input format."
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(Secrets.azureOpenAIKey, forHTTPHeaderField: "api-key")
+
+        let requestBody: [String: Any] = [
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": textsForTranslation]
+            ],
+            "temperature": 0.3,
+            "max_tokens": min(2048, max(256, texts.count * 50))
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return nil }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let firstChoice = choices.first,
+                  let message = firstChoice["message"] as? [String: Any],
+                  let translatedText = message["content"] as? String else { return nil }
+
+            return parseNumberedTranslations(translatedText)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Background translation using Gemini (no UI updates)
+    private func translateTextsWithGemini(_ texts: [ExtractedText], to targetLanguage: String) async -> [String]? {
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=\(Secrets.geminiAPIKey)")!
+
+        let textsForTranslation = texts.enumerated().map { "\($0.offset + 1).\($0.element.japanese)" }.joined(separator: "\n")
+        let lang = targetLanguage == "en" ? "EN" : "ZH"
+        let prompt = "Manga JP→\(lang). Natural, concise. Reply numbered only:\n\(textsForTranslation)"
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let requestBody: [String: Any] = [
+            "contents": [["parts": [["text": prompt]]]],
+            "generationConfig": ["temperature": 0.3, "maxOutputTokens": min(2048, max(256, texts.count * 50))]
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return nil }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let firstPart = parts.first,
+                  let translatedText = firstPart["text"] as? String else { return nil }
+
+            return parseNumberedTranslations(translatedText)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Background translation using Azure Translator (no UI updates)
+    private func translateTextsWithAzureTranslator(_ texts: [ExtractedText], to targetLanguage: String) async -> [String]? {
+        guard !Secrets.azureTranslatorKey.isEmpty else { return nil }
+
+        let urlString = "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=ja&to=\(targetLanguage)"
+        guard let url = URL(string: urlString) else { return nil }
+
+        let textsToTranslate = texts.map { ["Text": $0.japanese] }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(Secrets.azureTranslatorKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        request.setValue(Secrets.azureTranslatorRegion, forHTTPHeaderField: "Ocp-Apim-Subscription-Region")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: textsToTranslate)
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return nil }
+
+            guard let translations = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+
+            return translations.compactMap { translation -> String? in
+                guard let translationArray = translation["translations"] as? [[String: Any]],
+                      let firstTranslation = translationArray.first,
+                      let text = firstTranslation["text"] as? String else { return nil }
+                return text
+            }
+        } catch {
+            return nil
         }
     }
 

@@ -92,7 +92,7 @@ struct ComicTranslationView: View {
             .toolbar {
                 if currentDisplayImage != nil {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: clearSelection) {
+                        Button(action: closeSession) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.gray)
                         }
@@ -154,56 +154,112 @@ struct ComicTranslationView: View {
         } message: {
             Text(saveAlertMessage)
         }
+        .onDisappear {
+            // Auto-save current session when navigating away
+            if !allImages.isEmpty {
+                // Update session language to current selection before saving
+                manager.sessionTargetLanguage = targetLanguage.rawValue
+                manager.saveCurrentSession()
+            }
+        }
     }
 
     // MARK: - Empty State View
 
     private var emptyStateView: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: 24) {
+                // New session section
+                VStack(spacing: 16) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 50))
+                        .foregroundColor(.gray)
 
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
+                    Text("New Translation")
+                        .font(.title3)
+                        .fontWeight(.semibold)
 
-            Text("Upload a Comic Page")
-                .font(.title2)
-                .fontWeight(.semibold)
+                    Text("Select an image or PDF containing Japanese text")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
 
-            Text("Select an image or PDF containing Japanese text to translate")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                    HStack(spacing: 12) {
+                        Button(action: { showingImagePicker = true }) {
+                            Label("Image", systemImage: "photo")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.red)
+                                .cornerRadius(10)
+                        }
 
-            VStack(spacing: 12) {
-                Button(action: { showingImagePicker = true }) {
-                    Label("Select Image", systemImage: "photo")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red)
-                        .cornerRadius(12)
+                        Button(action: { showingDocumentPicker = true }) {
+                            Label("PDF", systemImage: "doc.fill")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.red)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.red, lineWidth: 1)
+                                )
+                        }
+                    }
                 }
+                .padding()
+                .background(Color(UIColor.secondarySystemBackground))
+                .cornerRadius(16)
+                .padding(.horizontal)
 
-                Button(action: { showingDocumentPicker = true }) {
-                    Label("Select PDF", systemImage: "doc.fill")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.1))
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.red, lineWidth: 1)
-                        )
+                // Saved sessions section
+                if !manager.savedSessions.isEmpty {
+                    savedSessionsSection
                 }
             }
-            .padding(.horizontal, 40)
+            .padding(.vertical)
+        }
+    }
 
-            Spacer()
+    // MARK: - Saved Sessions Section
+
+    private var savedSessionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Sessions")
+                    .font(.headline)
+                Spacer()
+                Text("\(manager.savedSessions.count)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal)
+
+            LazyVStack(spacing: 8) {
+                ForEach(manager.savedSessions) { session in
+                    SavedSessionRow(session: session, onTap: {
+                        loadSession(session)
+                    }, onDelete: {
+                        manager.deleteSavedSession(session)
+                    })
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func loadSession(_ session: SavedComicSession) {
+        manager.loadSavedSession(session)
+        if let firstImage = manager.sessionImages.first {
+            Task {
+                // Pass the session's target language explicitly to ensure cache lookup works
+                await manager.processImage(firstImage, language: session.targetLanguage)
+            }
         }
     }
 
@@ -319,7 +375,7 @@ struct ComicTranslationView: View {
             }
             .padding(.horizontal)
 
-            // Overlay toggle and save button
+            // Overlay toggle, save button, and new session button
             HStack {
                 Text("Show overlay:")
                     .font(.subheadline)
@@ -330,6 +386,16 @@ struct ComicTranslationView: View {
                     .tint(.red)
 
                 Spacer()
+
+                // Retry button - re-run translation
+                if !manager.extractedTexts.isEmpty && !manager.isProcessing && !manager.isTranslating {
+                    Button(action: retryTranslation) {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.orange)
+                }
 
                 if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing {
                     Button(action: saveOverlayImage) {
@@ -345,6 +411,13 @@ struct ComicTranslationView: View {
                     .foregroundColor(.red)
                     .disabled(isSaving)
                 }
+
+                Button(action: startNewSession) {
+                    Label("New", systemImage: "plus.circle")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.blue)
             }
             .padding(.horizontal)
         }
@@ -520,46 +593,69 @@ struct ComicTranslationView: View {
 
         guard !images.isEmpty else { return }
 
+        let currentLanguage = targetLanguage.rawValue
+
         await MainActor.run {
+            // Auto-save current session before loading new images
+            if !allImages.isEmpty {
+                // Update session language to current selection before saving
+                manager.sessionTargetLanguage = targetLanguage.rawValue
+                manager.saveCurrentSession()
+                manager.resetSavedSessionId()  // New images will be a new session
+            }
+
             manager.sessionPDFPages = []
             manager.sessionImages = images
             manager.sessionCurrentPageIndex = 0
             manager.clearCache()
         }
 
-        // Process the first image
-        await manager.processImage(images[0])
-
-        // Start background processing for remaining images
+        // Start background processing for remaining images IMMEDIATELY (in parallel)
         if images.count > 1 {
+            let remainingImages = Array(images.dropFirst())
             Task.detached {
-                for i in 1..<images.count {
-                    await manager.processImageInBackground(images[i])
+                for image in remainingImages {
+                    await manager.processAndTranslateInBackground(image, language: currentLanguage)
                 }
             }
         }
+
+        // Process the first image (this runs in parallel with background tasks)
+        await manager.processImage(images[0])
     }
 
     private func handlePDFSelection(_ url: URL) {
+        // Auto-save current session before loading new PDF
+        if !allImages.isEmpty {
+            // Update session language to current selection before saving
+            manager.sessionTargetLanguage = targetLanguage.rawValue
+            manager.saveCurrentSession()
+            manager.resetSavedSessionId()  // New PDF will be a new session
+        }
+
         manager.sessionImages = []
         manager.sessionPDFPages = manager.extractPDFPages(from: url)
         manager.sessionCurrentPageIndex = 0
         manager.clearCache()
 
-        if let firstPage = manager.sessionPDFPages.first {
-            Task {
-                await manager.processImage(firstPage)
+        let currentLanguage = targetLanguage.rawValue
+        let pages = manager.sessionPDFPages
 
-                // Start background processing for remaining pages
-                if manager.sessionPDFPages.count > 1 {
-                    let pages = manager.sessionPDFPages
-                    Task.detached {
-                        for i in 1..<pages.count {
-                            await manager.processImageInBackground(pages[i])
-                        }
-                    }
+        guard let firstPage = pages.first else { return }
+
+        // Start background processing for remaining pages IMMEDIATELY (in parallel)
+        if pages.count > 1 {
+            let remainingPages = Array(pages.dropFirst())
+            Task.detached {
+                for page in remainingPages {
+                    await manager.processAndTranslateInBackground(page, language: currentLanguage)
                 }
             }
+        }
+
+        // Process the first page (this runs in parallel with background tasks)
+        Task {
+            await manager.processImage(firstPage)
         }
     }
 
@@ -576,9 +672,15 @@ struct ComicTranslationView: View {
     private func switchToCurrentPage() {
         guard let image = currentDisplayImage else { return }
 
-        // Cancel any ongoing translation
-        manager.cancelSession()
-        translationConfiguration = nil
+        // Check if we have cached results for this image first
+        // Only cancel if we actually need to process
+        let hasCache = manager.hasCachedResults(for: image)
+
+        if !hasCache {
+            // Cancel any ongoing translation only if we need to reprocess
+            manager.cancelSession()
+            translationConfiguration = nil
+        }
 
         Task {
             await manager.processImage(image)
@@ -596,8 +698,51 @@ struct ComicTranslationView: View {
         manager.extractedTexts = []
         manager.errorMessage = nil
         manager.clearCache()
+        manager.resetSavedSessionId()  // Important: reset so next save creates new session
         translationConfiguration = nil
         manager.sessionShowOverlay = true  // Reset to default
+    }
+
+    private func startNewSession() {
+        // Save current session before starting new one
+        if !allImages.isEmpty {
+            // Update session language to current selection before saving
+            manager.sessionTargetLanguage = targetLanguage.rawValue
+            manager.saveCurrentSession()
+        }
+
+        // Clear for new session
+        clearSelection()
+    }
+
+    private func closeSession() {
+        // Save current session before closing (X button)
+        if !allImages.isEmpty {
+            // Update session language to current selection before saving
+            manager.sessionTargetLanguage = targetLanguage.rawValue
+            manager.saveCurrentSession()
+        }
+
+        // Clear the view
+        clearSelection()
+    }
+
+    private func retryTranslation() {
+        // Force re-run translation for current image
+        guard let image = currentDisplayImage else { return }
+
+        // Clear the translation from cache to force re-translation
+        manager.clearTranslationForCurrentLanguage(for: image, language: targetLanguage.rawValue)
+
+        // Trigger translation
+        Task {
+            await manager.translateWithGemini(to: targetLanguage.rawValue)
+
+            // Cache the new translations
+            if let img = currentDisplayImage {
+                manager.cacheTranslations(for: img, language: targetLanguage.rawValue)
+            }
+        }
     }
 
     private func saveOverlayImage() {
@@ -643,12 +788,12 @@ struct ComicTranslationView: View {
                 context.cgContext.fillPath()
 
                 // Calculate font size that fits the text in the box
-                let textRect = boxRect.insetBy(dx: 4, dy: 4)
+                let textRect = boxRect.insetBy(dx: 3, dy: 3)
                 let fontSize = calculateFittingFontSize(
                     for: text.translation,
                     in: textRect,
-                    minSize: 8,
-                    maxSize: 48
+                    minSize: 6,
+                    maxSize: 36
                 )
 
                 // Draw text
@@ -724,70 +869,67 @@ struct TranslationOverlayText: View {
     let isVertical: Bool
     let boxRect: CGRect
 
-    // Minimum font size to ensure readability
-    private let minFontSize: CGFloat = 10
-    private let maxFontSize: CGFloat = 24
-    private let padding: CGFloat = 4
+    // Font size bounds - smaller for comic translation overlays
+    private let minFontSize: CGFloat = 6
+    private let maxFontSize: CGFloat = 18
+    private let padding: CGFloat = 3
 
     var body: some View {
         let (fontSize, adjustedSize) = calculateFontAndBoxSize()
 
         Text(translation)
             .font(.system(size: fontSize))
-            .fontWeight(.bold)
+            .fontWeight(.semibold)
             .foregroundColor(.white)
             .lineLimit(nil)
+            .minimumScaleFactor(0.5)  // Allow text to shrink to fit
             .multilineTextAlignment(.center)
             .frame(width: adjustedSize.width - padding * 2, height: adjustedSize.height - padding * 2)
             .padding(padding)
             .background(Color.black.opacity(0.9))
-            .cornerRadius(4)
+            .cornerRadius(3)
     }
 
-    /// Calculate font size and potentially expanded box size to fit minimum readable text
+    /// Calculate font size and box size - prioritize fitting text within original box
     private func calculateFontAndBoxSize() -> (fontSize: CGFloat, boxSize: CGSize) {
-        // Start with original box size
-        var boxWidth = boxRect.width
-        var boxHeight = boxRect.height
+        let boxWidth = boxRect.width
+        let boxHeight = boxRect.height
 
-        // Calculate font size based on box dimensions
+        // Calculate font size based on box dimensions and text length
         let area = boxWidth * boxHeight
         let charCount = max(1, CGFloat(translation.count))
         let areaPerChar = area / charCount
-        var fontSize = sqrt(areaPerChar) * 0.7
+        var fontSize = sqrt(areaPerChar) * 0.65  // Slightly smaller multiplier
 
-        // Enforce minimum font size
-        if fontSize < minFontSize {
-            fontSize = minFontSize
+        // Clamp font size to bounds
+        fontSize = max(minFontSize, min(fontSize, maxFontSize))
 
-            // Need to expand the box to fit the text at minimum font size
-            // Estimate required area based on minimum font
-            let charWidth = fontSize * 0.6  // Approximate character width
-            let charHeight = fontSize * 1.2  // Line height
+        // Calculate if text fits at this font size
+        let charWidth = fontSize * 0.55  // Approximate character width
+        let lineHeight = fontSize * 1.15  // Line height
 
-            // Calculate how many characters fit per line
-            let charsPerLine = max(1, Int(boxWidth / charWidth))
-            let linesNeeded = Int(ceil(Double(translation.count) / Double(charsPerLine)))
+        let charsPerLine = max(1, Int((boxWidth - padding * 2) / charWidth))
+        let linesNeeded = Int(ceil(Double(translation.count) / Double(charsPerLine)))
+        let requiredHeight = CGFloat(linesNeeded) * lineHeight + padding * 2
 
-            // Calculate required height
-            let requiredHeight = CGFloat(linesNeeded) * charHeight + padding * 2
-
-            // Expand box if needed (add minimum expansion factor)
-            if requiredHeight > boxHeight {
-                boxHeight = max(boxHeight * 1.2, requiredHeight)
-            }
-
-            // Also ensure minimum width for readability
-            let minWidth: CGFloat = 40
-            if boxWidth < minWidth {
-                boxWidth = minWidth
+        // Only expand height slightly if absolutely necessary, cap at 1.3x original
+        var finalHeight = boxHeight
+        if requiredHeight > boxHeight {
+            // Try shrinking font first before expanding box
+            let shrinkFactor = boxHeight / requiredHeight
+            if shrinkFactor >= 0.7 {
+                // Text will fit with minimumScaleFactor, keep original box
+                finalHeight = boxHeight
+            } else {
+                // Need some expansion, but cap it
+                finalHeight = min(requiredHeight, boxHeight * 1.3)
             }
         }
 
-        // Cap at maximum font size
-        fontSize = min(fontSize, maxFontSize)
+        // Ensure minimum width for readability
+        let finalWidth = max(boxWidth, 30)
 
-        return (fontSize, CGSize(width: boxWidth, height: boxHeight))
+        return (fontSize, CGSize(width: finalWidth, height: finalHeight))
     }
 }
 
@@ -834,6 +976,74 @@ struct ExtractedTextRow: View {
             }
         }
         .padding()
+    }
+}
+
+// MARK: - Saved Session Row
+
+struct SavedSessionRow: View {
+    let session: SavedComicSession
+    let onTap: () -> Void
+    let onDelete: () -> Void
+
+    @StateObject private var manager = ComicTranslationManager.shared
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Thumbnail
+                if let thumbnail = manager.getThumbnail(for: session) {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 50, height: 70)
+                        .cornerRadius(6)
+                        .clipped()
+                } else {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 50, height: 70)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(.gray)
+                        )
+                }
+
+                // Session info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(session.imageCount) \(session.imageCount == 1 ? "page" : "pages")")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+
+                    Text(session.displayDate)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text(session.targetLanguage == "en" ? "English" : "Chinese")
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.8))
+                        .cornerRadius(4)
+                }
+
+                Spacer()
+
+                // Delete button
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.body)
+                        .foregroundColor(.red.opacity(0.7))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(12)
+            .background(Color(UIColor.secondarySystemBackground))
+            .cornerRadius(10)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
