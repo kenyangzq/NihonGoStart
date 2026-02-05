@@ -234,3 +234,27 @@ struct JishoSense: Codable {
     let english_definitions: [String]
     let parts_of_speech: [String]
 }
+
+// MARK: - Bookmarked Text
+
+struct BookmarkedText: Identifiable, Codable {
+    var id: UUID = UUID()
+    let japanese: String
+    let translation: String
+    let targetLanguage: String  // "en" or "zh-Hans"
+    let dateAdded: Date
+    var note: String?  // Optional user note
+
+    private enum CodingKeys: String, CodingKey {
+        case id, japanese, translation, targetLanguage, dateAdded, note
+    }
+
+    init(japanese: String, translation: String, targetLanguage: String, note: String? = nil) {
+        self.id = UUID()
+        self.japanese = japanese
+        self.translation = translation
+        self.targetLanguage = targetLanguage
+        self.dateAdded = Date()
+        self.note = note
+    }
+}

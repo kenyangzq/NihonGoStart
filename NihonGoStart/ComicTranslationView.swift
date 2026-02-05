@@ -34,6 +34,9 @@ struct ComicTranslationView: View {
     @State private var showingDictionary = false
     @State private var dictionaryTerm = ""
 
+    // Bookmarks state
+    @State private var showingBookmarks = false
+
     // Zoom/pan state
     @State private var zoomScale: CGFloat = 1.0
     @State private var lastZoomScale: CGFloat = 1.0
@@ -109,6 +112,13 @@ struct ComicTranslationView: View {
             .navigationTitle("Comic Translation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { showingBookmarks = true }) {
+                        Image(systemName: "bookmark")
+                            .foregroundColor(.yellow)
+                    }
+                }
+
                 if currentDisplayImage != nil {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(action: closeSession) {
@@ -176,6 +186,9 @@ struct ComicTranslationView: View {
         }
         .sheet(isPresented: $showingDictionary) {
             DictionaryLookupSheet(term: dictionaryTerm)
+        }
+        .sheet(isPresented: $showingBookmarks) {
+            BookmarksView()
         }
         .onDisappear {
             // Auto-save current session when navigating away
@@ -360,7 +373,11 @@ struct ComicTranslationView: View {
                             .padding(.bottom, 8)
 
                         ForEach(manager.extractedTexts) { text in
-                            ExtractedTextRow(text: text, speechManager: speechManager) { term in
+                            ExtractedTextRow(
+                                text: text,
+                                speechManager: speechManager,
+                                targetLanguage: targetLanguage.rawValue
+                            ) { term in
                                 dictionaryTerm = term
                                 showingDictionary = true
                             }
@@ -1265,9 +1282,16 @@ struct ZoomableImageView: View {
 struct ExtractedTextRow: View {
     let text: ExtractedText
     let speechManager: SpeechManager
+    let targetLanguage: String
     let onLookup: (String) -> Void
 
+    @StateObject private var bookmarksManager = BookmarksManager.shared
     @State private var showCopiedToast = false
+    @State private var toastMessage = "Copied!"
+
+    private var isBookmarked: Bool {
+        bookmarksManager.isBookmarked(japanese: text.japanese)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1278,6 +1302,7 @@ struct ExtractedTextRow: View {
                     .contextMenu {
                         Button {
                             UIPasteboard.general.string = text.japanese
+                            toastMessage = "Copied!"
                             showCopiedToast = true
                         } label: {
                             Label("Copy Japanese", systemImage: "doc.on.doc")
@@ -1286,6 +1311,7 @@ struct ExtractedTextRow: View {
                         if !text.translation.isEmpty {
                             Button {
                                 UIPasteboard.general.string = text.translation
+                                toastMessage = "Copied!"
                                 showCopiedToast = true
                             } label: {
                                 Label("Copy Translation", systemImage: "doc.on.doc")
@@ -1293,6 +1319,7 @@ struct ExtractedTextRow: View {
 
                             Button {
                                 UIPasteboard.general.string = "\(text.japanese)\n\(text.translation)"
+                                toastMessage = "Copied!"
                                 showCopiedToast = true
                             } label: {
                                 Label("Copy Both", systemImage: "doc.on.doc.fill")
@@ -1306,12 +1333,47 @@ struct ExtractedTextRow: View {
                         } label: {
                             Label("Look Up", systemImage: "book")
                         }
+
+                        Divider()
+
+                        Button {
+                            bookmarksManager.toggleBookmark(
+                                japanese: text.japanese,
+                                translation: text.translation,
+                                targetLanguage: targetLanguage
+                            )
+                            toastMessage = isBookmarked ? "Removed from bookmarks" : "Bookmarked!"
+                            showCopiedToast = true
+                        } label: {
+                            Label(
+                                isBookmarked ? "Remove Bookmark" : "Add Bookmark",
+                                systemImage: isBookmarked ? "bookmark.slash" : "bookmark"
+                            )
+                        }
                     }
                     .onTapGesture {
                         onLookup(text.japanese)
                     }
 
                 Spacer()
+
+                // Bookmark button
+                if !text.translation.isEmpty {
+                    Button(action: {
+                        bookmarksManager.toggleBookmark(
+                            japanese: text.japanese,
+                            translation: text.translation,
+                            targetLanguage: targetLanguage
+                        )
+                        toastMessage = isBookmarked ? "Removed" : "Bookmarked!"
+                        showCopiedToast = true
+                    }) {
+                        Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                            .font(.body)
+                            .foregroundColor(isBookmarked ? .yellow : .gray)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
 
                 Button(action: {
                     speechManager.speak(text.japanese)
@@ -1332,6 +1394,7 @@ struct ExtractedTextRow: View {
                     .contextMenu {
                         Button {
                             UIPasteboard.general.string = text.translation
+                            toastMessage = "Copied!"
                             showCopiedToast = true
                         } label: {
                             Label("Copy Translation", systemImage: "doc.on.doc")
@@ -1351,7 +1414,7 @@ struct ExtractedTextRow: View {
         .padding()
         .overlay(alignment: .top) {
             if showCopiedToast {
-                Text("Copied!")
+                Text(toastMessage)
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundColor(.white)
