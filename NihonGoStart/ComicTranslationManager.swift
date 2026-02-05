@@ -29,6 +29,7 @@ struct SavedComicSession: Codable, Identifiable {
     let imageCount: Int
     let targetLanguage: String
     var thumbnailData: Data?  // First image thumbnail for preview
+    var name: String?  // User-defined session name
 
     // File paths for images (stored separately due to size)
     var imageFileNames: [String]
@@ -38,6 +39,13 @@ struct SavedComicSession: Codable, Identifiable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: lastAccessedAt)
+    }
+
+    var displayName: String {
+        if let name = name, !name.isEmpty {
+            return name
+        }
+        return "\(imageCount) \(imageCount == 1 ? "page" : "pages")"
     }
 }
 
@@ -305,6 +313,13 @@ class ComicTranslationManager: ObservableObject {
         }
     }
 
+    /// Rename a saved session
+    func renameSession(_ session: SavedComicSession, to newName: String) {
+        guard let index = savedSessions.firstIndex(where: { $0.id == session.id }) else { return }
+        savedSessions[index].name = newName.isEmpty ? nil : newName
+        saveSessionsIndex()
+    }
+
     /// Get thumbnail image for a session
     func getThumbnail(for session: SavedComicSession) -> UIImage? {
         guard let data = session.thumbnailData else { return nil }
@@ -413,6 +428,12 @@ class ComicTranslationManager: ObservableObject {
     /// Clear all cached results
     func clearCache() {
         translationCache.removeAll()
+    }
+
+    /// Clear cache for a specific image (for full retry)
+    func clearCacheForImage(_ image: UIImage) {
+        let hash = hashForImage(image)
+        translationCache.removeValue(forKey: hash)
     }
 
     /// Reset the saved session ID (call when starting a fresh session)

@@ -30,6 +30,13 @@ struct ComicTranslationView: View {
     @State private var saveAlertMessage = ""
     @State private var isSaving = false
 
+    // Dictionary lookup state
+    @State private var showingDictionary = false
+    @State private var dictionaryTerm = ""
+
+    // Font size preference (persisted)
+    @AppStorage("overlayFontSize") private var overlayFontSize: Double = 12.0
+
     private let speechManager = SpeechManager.shared
     private let maxImageSelection = 9
 
@@ -94,6 +101,7 @@ struct ComicTranslationView: View {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(action: closeSession) {
                             Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
                                 .foregroundColor(.gray)
                         }
                     }
@@ -153,6 +161,9 @@ struct ComicTranslationView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(saveAlertMessage)
+        }
+        .sheet(isPresented: $showingDictionary) {
+            DictionaryLookupSheet(term: dictionaryTerm)
         }
         .onDisappear {
             // Auto-save current session when navigating away
@@ -246,6 +257,8 @@ struct ComicTranslationView: View {
                         loadSession(session)
                     }, onDelete: {
                         manager.deleteSavedSession(session)
+                    }, onRename: { newName in
+                        manager.renameSession(session, to: newName)
                     })
                 }
             }
@@ -273,50 +286,52 @@ struct ComicTranslationView: View {
 
                 // Image display with optional overlay and swipe gestures
                 if let image = currentDisplayImage {
-                    ZStack {
-                        Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-
-                        if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing && !manager.isTranslating {
-                            GeometryReader { geometry in
-                                translationOverlay(in: geometry.size)
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .overlay {
+                            if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing && !manager.isTranslating {
+                                GeometryReader { geometry in
+                                    translationOverlay(in: geometry.size)
+                                }
                             }
                         }
+                        .overlay {
+                            // Progress overlay on top of image
+                            if manager.isProcessing || manager.isTranslating {
+                                ZStack {
+                                    // Dim the image
+                                    Color.black.opacity(0.5)
 
-                        // Progress overlay on top of image
-                        if manager.isProcessing || manager.isTranslating {
-                            // Dim the image
-                            Color.black.opacity(0.5)
-
-                            // Progress indicator
-                            VStack(spacing: 12) {
-                                ProgressView()
-                                    .scaleEffect(1.5)
-                                    .tint(.white)
-                                Text(manager.translationProgress.isEmpty ?
-                                     (manager.isProcessing ? "Processing..." : "Translating...") :
-                                     manager.translationProgress)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white)
-                                    .multilineTextAlignment(.center)
+                                    // Progress indicator
+                                    VStack(spacing: 12) {
+                                        ProgressView()
+                                            .scaleEffect(1.5)
+                                            .tint(.white)
+                                        Text(manager.translationProgress.isEmpty ?
+                                             (manager.isProcessing ? "Processing..." : "Translating...") :
+                                             manager.translationProgress)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.white)
+                                            .multilineTextAlignment(.center)
+                                    }
+                                    .padding(.horizontal, 32)
+                                    .padding(.vertical, 20)
+                                    .background(Color.black.opacity(0.7))
+                                    .cornerRadius(16)
+                                }
                             }
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 20)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(16)
                         }
-                    }
-                    .cornerRadius(12)
-                    .shadow(radius: 4)
-                    .padding(.horizontal)
-                    .gesture(
-                        DragGesture(minimumDistance: 50)
-                            .onEnded { value in
-                                handleSwipe(value)
-                            }
-                    )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(radius: 4)
+                        .padding(.horizontal)
+                        .gesture(
+                            DragGesture(minimumDistance: 50)
+                                .onEnded { value in
+                                    handleSwipe(value)
+                                }
+                        )
                 }
 
                 if totalPages > 1 {
@@ -345,7 +360,10 @@ struct ComicTranslationView: View {
                             .padding(.bottom, 8)
 
                         ForEach(manager.extractedTexts) { text in
-                            ExtractedTextRow(text: text, speechManager: speechManager)
+                            ExtractedTextRow(text: text, speechManager: speechManager) { term in
+                                dictionaryTerm = term
+                                showingDictionary = true
+                            }
                             Divider()
                                 .padding(.horizontal)
                         }
@@ -375,7 +393,7 @@ struct ComicTranslationView: View {
             }
             .padding(.horizontal)
 
-            // Overlay toggle, save button, and new session button
+            // Overlay toggle and font size
             HStack {
                 Text("Show overlay:")
                     .font(.subheadline)
@@ -385,6 +403,27 @@ struct ComicTranslationView: View {
                     .labelsHidden()
                     .tint(.red)
 
+                Spacer()
+
+                // Font size control (only shown when overlay is on)
+                if showOverlay {
+                    HStack(spacing: 4) {
+                        Image(systemName: "textformat.size.smaller")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Slider(value: $overlayFontSize, in: 8...24, step: 1)
+                            .frame(width: 80)
+                            .tint(.red)
+                        Image(systemName: "textformat.size.larger")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            // Action buttons
+            HStack {
                 Spacer()
 
                 // Retry button - re-run translation
@@ -444,7 +483,8 @@ struct ComicTranslationView: View {
                     TranslationOverlayText(
                         translation: text.translation,
                         isVertical: isVertical,
-                        boxRect: boxRect
+                        boxRect: boxRect,
+                        baseFontSize: CGFloat(overlayFontSize)
                     )
                     .position(
                         x: boxRect.midX,
@@ -463,24 +503,36 @@ struct ComicTranslationView: View {
     // MARK: - Page Navigation
 
     private var pageNavigationView: some View {
-        HStack {
-            Button(action: previousPage) {
-                Image(systemName: "chevron.left.circle.fill")
-                    .font(.title2)
-            }
-            .disabled(currentPageIndex == 0)
+        VStack(spacing: 8) {
+            // Thumbnail strip
+            PageThumbnailStrip(
+                images: allImages,
+                currentIndex: currentPageIndex,
+                onSelect: { index in
+                    manager.sessionCurrentPageIndex = index
+                }
+            )
 
-            Text("\(!manager.sessionPDFPages.isEmpty ? "Page" : "Image") \(currentPageIndex + 1) of \(totalPages)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Navigation buttons
+            HStack {
+                Button(action: previousPage) {
+                    Image(systemName: "chevron.left.circle.fill")
+                        .font(.title2)
+                }
+                .disabled(currentPageIndex == 0)
 
-            Button(action: nextPage) {
-                Image(systemName: "chevron.right.circle.fill")
-                    .font(.title2)
+                Text("\(!manager.sessionPDFPages.isEmpty ? "Page" : "Image") \(currentPageIndex + 1) of \(totalPages)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Button(action: nextPage) {
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.title2)
+                }
+                .disabled(currentPageIndex >= totalPages - 1)
             }
-            .disabled(currentPageIndex >= totalPages - 1)
+            .foregroundColor(.red)
         }
-        .foregroundColor(.red)
     }
 
     // MARK: - Swipe Handling
@@ -610,12 +662,16 @@ struct ComicTranslationView: View {
             manager.clearCache()
         }
 
-        // Start background processing for remaining images IMMEDIATELY (in parallel)
+        // Start background processing for remaining images in PARALLEL
         if images.count > 1 {
             let remainingImages = Array(images.dropFirst())
             Task.detached {
-                for image in remainingImages {
-                    await manager.processAndTranslateInBackground(image, language: currentLanguage)
+                await withTaskGroup(of: Void.self) { group in
+                    for image in remainingImages {
+                        group.addTask {
+                            await manager.processAndTranslateInBackground(image, language: currentLanguage)
+                        }
+                    }
                 }
             }
         }
@@ -643,12 +699,16 @@ struct ComicTranslationView: View {
 
         guard let firstPage = pages.first else { return }
 
-        // Start background processing for remaining pages IMMEDIATELY (in parallel)
+        // Start background processing for remaining pages in PARALLEL
         if pages.count > 1 {
             let remainingPages = Array(pages.dropFirst())
             Task.detached {
-                for page in remainingPages {
-                    await manager.processAndTranslateInBackground(page, language: currentLanguage)
+                await withTaskGroup(of: Void.self) { group in
+                    for page in remainingPages {
+                        group.addTask {
+                            await manager.processAndTranslateInBackground(page, language: currentLanguage)
+                        }
+                    }
                 }
             }
         }
@@ -728,20 +788,17 @@ struct ComicTranslationView: View {
     }
 
     private func retryTranslation() {
-        // Force re-run translation for current image
+        // Force re-run entire flow (OCR + translation) for current image
         guard let image = currentDisplayImage else { return }
 
-        // Clear the translation from cache to force re-translation
-        manager.clearTranslationForCurrentLanguage(for: image, language: targetLanguage.rawValue)
+        // Clear entire cache for this image to force full reprocessing
+        manager.clearCacheForImage(image)
+        manager.extractedTexts = []
+        manager.errorMessage = nil
 
-        // Trigger translation
+        // Reprocess the image from scratch
         Task {
-            await manager.translateWithGemini(to: targetLanguage.rawValue)
-
-            // Cache the new translations
-            if let img = currentDisplayImage {
-                manager.cacheTranslations(for: img, language: targetLanguage.rawValue)
-            }
+            await manager.processImage(image, language: targetLanguage.rawValue)
         }
     }
 
@@ -868,10 +925,11 @@ struct TranslationOverlayText: View {
     let translation: String
     let isVertical: Bool
     let boxRect: CGRect
+    var baseFontSize: CGFloat = 12  // User-adjustable base size
 
-    // Font size bounds - smaller for comic translation overlays
-    private let minFontSize: CGFloat = 6
-    private let maxFontSize: CGFloat = 18
+    // Font size bounds relative to base size
+    private var minFontSize: CGFloat { max(6, baseFontSize - 6) }
+    private var maxFontSize: CGFloat { baseFontSize + 6 }
     private let padding: CGFloat = 3
 
     var body: some View {
@@ -900,6 +958,9 @@ struct TranslationOverlayText: View {
         let charCount = max(1, CGFloat(translation.count))
         let areaPerChar = area / charCount
         var fontSize = sqrt(areaPerChar) * 0.65  // Slightly smaller multiplier
+
+        // Adjust based on user preference
+        fontSize = fontSize * (baseFontSize / 12.0)
 
         // Clamp font size to bounds
         fontSize = max(minFontSize, min(fontSize, maxFontSize))
@@ -938,6 +999,9 @@ struct TranslationOverlayText: View {
 struct ExtractedTextRow: View {
     let text: ExtractedText
     let speechManager: SpeechManager
+    let onLookup: (String) -> Void
+
+    @State private var showCopiedToast = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -945,6 +1009,41 @@ struct ExtractedTextRow: View {
                 Text(text.japanese)
                     .font(.title3)
                     .fontWeight(.medium)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = text.japanese
+                            showCopiedToast = true
+                        } label: {
+                            Label("Copy Japanese", systemImage: "doc.on.doc")
+                        }
+
+                        if !text.translation.isEmpty {
+                            Button {
+                                UIPasteboard.general.string = text.translation
+                                showCopiedToast = true
+                            } label: {
+                                Label("Copy Translation", systemImage: "doc.on.doc")
+                            }
+
+                            Button {
+                                UIPasteboard.general.string = "\(text.japanese)\n\(text.translation)"
+                                showCopiedToast = true
+                            } label: {
+                                Label("Copy Both", systemImage: "doc.on.doc.fill")
+                            }
+                        }
+
+                        Divider()
+
+                        Button {
+                            onLookup(text.japanese)
+                        } label: {
+                            Label("Look Up", systemImage: "book")
+                        }
+                    }
+                    .onTapGesture {
+                        onLookup(text.japanese)
+                    }
 
                 Spacer()
 
@@ -964,6 +1063,14 @@ struct ExtractedTextRow: View {
                 Text(text.translation)
                     .font(.body)
                     .foregroundColor(.blue)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = text.translation
+                            showCopiedToast = true
+                        } label: {
+                            Label("Copy Translation", systemImage: "doc.on.doc")
+                        }
+                    }
             } else {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -976,6 +1083,25 @@ struct ExtractedTextRow: View {
             }
         }
         .padding()
+        .overlay(alignment: .top) {
+            if showCopiedToast {
+                Text("Copied!")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation { showCopiedToast = false }
+                        }
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showCopiedToast)
     }
 }
 
@@ -985,13 +1111,16 @@ struct SavedSessionRow: View {
     let session: SavedComicSession
     let onTap: () -> Void
     let onDelete: () -> Void
+    let onRename: (String) -> Void
 
     @StateObject private var manager = ComicTranslationManager.shared
+    @State private var showingRenameAlert = false
+    @State private var newName = ""
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Thumbnail
+        HStack(spacing: 12) {
+            // Thumbnail with page count badge
+            ZStack(alignment: .bottomTrailing) {
                 if let thumbnail = manager.getThumbnail(for: session) {
                     Image(uiImage: thumbnail)
                         .resizable()
@@ -1009,41 +1138,265 @@ struct SavedSessionRow: View {
                         )
                 }
 
-                // Session info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(session.imageCount) \(session.imageCount == 1 ? "page" : "pages")")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-
-                    Text(session.displayDate)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Text(session.targetLanguage == "en" ? "English" : "Chinese")
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.8))
-                        .cornerRadius(4)
-                }
-
-                Spacer()
-
-                // Delete button
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.body)
-                        .foregroundColor(.red.opacity(0.7))
-                }
-                .buttonStyle(PlainButtonStyle())
+                // Page count badge
+                Text("\(session.imageCount)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(4)
+                    .offset(x: 2, y: 2)
             }
-            .padding(12)
-            .background(Color(UIColor.secondarySystemBackground))
-            .cornerRadius(10)
+
+            // Session info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                Text(session.displayDate)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Text(session.targetLanguage == "en" ? "English" : "Chinese")
+                    .font(.caption2)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.8))
+                    .cornerRadius(4)
+            }
+
+            Spacer()
+
+            // Delete button
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.body)
+                    .foregroundColor(.red.opacity(0.7))
+            }
+            .buttonStyle(PlainButtonStyle())
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(12)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
+        .onLongPressGesture {
+            newName = session.name ?? ""
+            showingRenameAlert = true
+        }
+        .alert("Rename Session", isPresented: $showingRenameAlert) {
+            TextField("Session name", text: $newName)
+            Button("Cancel", role: .cancel) { }
+            Button("Save") {
+                onRename(newName)
+            }
+        } message: {
+            Text("Enter a new name for this session")
+        }
+    }
+}
+
+// MARK: - Page Thumbnail Strip
+
+struct PageThumbnailStrip: View {
+    let images: [UIImage]
+    let currentIndex: Int
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(images.indices, id: \.self) { index in
+                        PageThumbnail(
+                            image: images[index],
+                            index: index,
+                            isSelected: index == currentIndex
+                        )
+                        .onTapGesture { onSelect(index) }
+                        .id(index)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+            }
+            .onChange(of: currentIndex) { _, newIndex in
+                withAnimation {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
+            }
+        }
+        .frame(height: 85)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal)
+    }
+}
+
+struct PageThumbnail: View {
+    let image: UIImage
+    let index: Int
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 45, height: 65)
+                .cornerRadius(6)
+                .clipped()
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isSelected ? Color.red : Color.clear, lineWidth: 3)
+                )
+                .shadow(color: isSelected ? Color.red.opacity(0.3) : Color.clear, radius: 4)
+
+            // Page number badge
+            Text("\(index + 1)")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(3)
+                .offset(x: 2, y: 2)
+        }
+        .opacity(isSelected ? 1.0 : 0.7)
+    }
+}
+
+// MARK: - Dictionary Lookup Sheet
+
+struct DictionaryLookupSheet: View {
+    let term: String
+    @Environment(\.dismiss) var dismiss
+    @State private var jishoResults: [JishoWord] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if isLoading {
+                    ProgressView("Looking up...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = errorMessage {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                } else if jishoResults.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No definitions found for")
+                            .foregroundColor(.secondary)
+                        Text(term)
+                            .font(.title2)
+                            .fontWeight(.medium)
+                    }
+                    .padding()
+                } else {
+                    List(jishoResults) { word in
+                        JishoWordRow(word: word)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle(term)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task {
+            await lookupWord()
+        }
+    }
+
+    private func lookupWord() async {
+        // First try Apple's built-in dictionary
+        if UIReferenceLibraryViewController.dictionaryHasDefinition(forTerm: term) {
+            // Apple dictionary has a definition - we could show it, but for now use Jisho for consistency
+        }
+
+        // Use Jisho API
+        guard let encodedTerm = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://jisho.org/api/v1/search/words?keyword=\(encodedTerm)") else {
+            errorMessage = "Invalid search term"
+            isLoading = false
+            return
+        }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(JishoResponse.self, from: data)
+            jishoResults = Array(response.data.prefix(10))  // Limit to 10 results
+            isLoading = false
+        } catch {
+            errorMessage = "Could not fetch definitions"
+            isLoading = false
+        }
+    }
+}
+
+struct JishoWordRow: View {
+    let word: JishoWord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Word and reading
+            HStack(alignment: .bottom, spacing: 8) {
+                if let japanese = word.japanese.first {
+                    if let wordText = japanese.word {
+                        Text(wordText)
+                            .font(.title2)
+                            .fontWeight(.medium)
+                    }
+                    if let reading = japanese.reading {
+                        Text(reading)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // Definitions
+            ForEach(Array(word.senses.prefix(3).enumerated()), id: \.offset) { index, sense in
+                VStack(alignment: .leading, spacing: 2) {
+                    // Parts of speech
+                    if !sense.parts_of_speech.isEmpty {
+                        Text(sense.parts_of_speech.joined(separator: ", "))
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                            .italic()
+                    }
+                    // Definitions
+                    Text("\(index + 1). \(sense.english_definitions.joined(separator: "; "))")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

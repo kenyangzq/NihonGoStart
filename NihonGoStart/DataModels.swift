@@ -211,3 +211,26 @@ struct ExtractedText: Identifiable {
     var translation: String
     let boundingBox: CGRect  // For future overlay feature
 }
+
+// MARK: - Jisho Dictionary API
+
+struct JishoResponse: Codable {
+    let data: [JishoWord]
+}
+
+struct JishoWord: Codable, Identifiable {
+    var id: String { slug }
+    let slug: String
+    let japanese: [JishoJapanese]
+    let senses: [JishoSense]
+}
+
+struct JishoJapanese: Codable {
+    let word: String?
+    let reading: String?
+}
+
+struct JishoSense: Codable {
+    let english_definitions: [String]
+    let parts_of_speech: [String]
+}
