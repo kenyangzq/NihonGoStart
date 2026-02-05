@@ -34,6 +34,16 @@ struct ComicTranslationView: View {
     @State private var showingDictionary = false
     @State private var dictionaryTerm = ""
 
+    // Zoom/pan state
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var lastZoomScale: CGFloat = 1.0
+    @State private var panOffset: CGSize = .zero
+    @State private var lastPanOffset: CGSize = .zero
+
+    // Loading state for image upload
+    @State private var isLoadingImages = false
+    @State private var loadingProgress: String = ""
+
     // Font size preference (persisted)
     @AppStorage("overlayFontSize") private var overlayFontSize: Double = 12.0
 
@@ -88,7 +98,9 @@ struct ComicTranslationView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                if currentDisplayImage == nil {
+                if isLoadingImages {
+                    loadingImagesView
+                } else if currentDisplayImage == nil {
                     emptyStateView
                 } else {
                     contentView
@@ -173,6 +185,26 @@ struct ComicTranslationView: View {
                 manager.saveCurrentSession()
             }
         }
+    }
+
+    // MARK: - Loading Images View
+
+    private var loadingImagesView: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+
+            Text(loadingProgress.isEmpty ? "Loading images..." : loadingProgress)
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            Text("Please wait while your images are being prepared")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(UIColor.systemBackground))
     }
 
     // MARK: - Empty State View
@@ -284,54 +316,22 @@ struct ComicTranslationView: View {
                 // Controls bar
                 controlsBar
 
-                // Image display with optional overlay and swipe gestures
+                // Image display with optional overlay, zoom/pan, and swipe gestures
                 if let image = currentDisplayImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .overlay {
-                            if showOverlay && !manager.extractedTexts.isEmpty && !manager.isProcessing && !manager.isTranslating {
-                                GeometryReader { geometry in
-                                    translationOverlay(in: geometry.size)
-                                }
-                            }
-                        }
-                        .overlay {
-                            // Progress overlay on top of image
-                            if manager.isProcessing || manager.isTranslating {
-                                ZStack {
-                                    // Dim the image
-                                    Color.black.opacity(0.5)
-
-                                    // Progress indicator
-                                    VStack(spacing: 12) {
-                                        ProgressView()
-                                            .scaleEffect(1.5)
-                                            .tint(.white)
-                                        Text(manager.translationProgress.isEmpty ?
-                                             (manager.isProcessing ? "Processing..." : "Translating...") :
-                                             manager.translationProgress)
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.white)
-                                            .multilineTextAlignment(.center)
-                                    }
-                                    .padding(.horizontal, 32)
-                                    .padding(.vertical, 20)
-                                    .background(Color.black.opacity(0.7))
-                                    .cornerRadius(16)
-                                }
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(radius: 4)
-                        .padding(.horizontal)
-                        .gesture(
-                            DragGesture(minimumDistance: 50)
-                                .onEnded { value in
-                                    handleSwipe(value)
-                                }
-                        )
+                    ZoomableImageView(
+                        image: image,
+                        zoomScale: $zoomScale,
+                        lastZoomScale: $lastZoomScale,
+                        panOffset: $panOffset,
+                        lastPanOffset: $lastPanOffset,
+                        showOverlay: showOverlay,
+                        extractedTexts: manager.extractedTexts,
+                        isProcessing: manager.isProcessing,
+                        isTranslating: manager.isTranslating,
+                        translationProgress: manager.translationProgress,
+                        overlayFontSize: overlayFontSize,
+                        onSwipe: handleSwipe
+                    )
                 }
 
                 if totalPages > 1 {
@@ -424,6 +424,24 @@ struct ComicTranslationView: View {
 
             // Action buttons
             HStack {
+                // Zoom indicator (only when zoomed)
+                if zoomScale > 1.0 {
+                    Button(action: resetZoom) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.caption)
+                            Text("\(Int(zoomScale * 100))%")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.gray.opacity(0.8))
+                        .cornerRadius(12)
+                    }
+                }
+
                 Spacer()
 
                 // Retry button - re-run translation
@@ -634,20 +652,38 @@ struct ComicTranslationView: View {
     private func loadImages(from items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
 
+        // Show loading indicator
+        await MainActor.run {
+            isLoadingImages = true
+            loadingProgress = "Loading \(items.count) image\(items.count > 1 ? "s" : "")..."
+        }
+
         var images: [UIImage] = []
 
-        for item in items {
+        for (index, item) in items.enumerated() {
+            await MainActor.run {
+                loadingProgress = "Loading image \(index + 1) of \(items.count)..."
+            }
+
             if let data = try? await item.loadTransferable(type: Data.self),
                let image = UIImage(data: data) {
                 images.append(image)
             }
         }
 
-        guard !images.isEmpty else { return }
+        guard !images.isEmpty else {
+            await MainActor.run {
+                isLoadingImages = false
+                loadingProgress = ""
+            }
+            return
+        }
 
         let currentLanguage = targetLanguage.rawValue
 
         await MainActor.run {
+            loadingProgress = "Preparing..."
+
             // Auto-save current session before loading new images
             if !allImages.isEmpty {
                 // Update session language to current selection before saving
@@ -660,6 +696,10 @@ struct ComicTranslationView: View {
             manager.sessionImages = images
             manager.sessionCurrentPageIndex = 0
             manager.clearCache()
+
+            // Hide loading indicator - image is now ready to display
+            isLoadingImages = false
+            loadingProgress = ""
         }
 
         // Start background processing for remaining images in PARALLEL
@@ -681,6 +721,10 @@ struct ComicTranslationView: View {
     }
 
     private func handlePDFSelection(_ url: URL) {
+        // Show loading indicator
+        isLoadingImages = true
+        loadingProgress = "Extracting PDF pages..."
+
         // Auto-save current session before loading new PDF
         if !allImages.isEmpty {
             // Update session language to current selection before saving
@@ -696,6 +740,10 @@ struct ComicTranslationView: View {
 
         let currentLanguage = targetLanguage.rawValue
         let pages = manager.sessionPDFPages
+
+        // Hide loading indicator
+        isLoadingImages = false
+        loadingProgress = ""
 
         guard let firstPage = pages.first else { return }
 
@@ -732,6 +780,9 @@ struct ComicTranslationView: View {
     private func switchToCurrentPage() {
         guard let image = currentDisplayImage else { return }
 
+        // Reset zoom when switching pages
+        resetZoom()
+
         // Check if we have cached results for this image first
         // Only cancel if we actually need to process
         let hasCache = manager.hasCachedResults(for: image)
@@ -744,6 +795,15 @@ struct ComicTranslationView: View {
 
         Task {
             await manager.processImage(image)
+        }
+    }
+
+    private func resetZoom() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            zoomScale = 1.0
+            lastZoomScale = 1.0
+            panOffset = .zero
+            lastPanOffset = .zero
         }
     }
 
@@ -761,6 +821,12 @@ struct ComicTranslationView: View {
         manager.resetSavedSessionId()  // Important: reset so next save creates new session
         translationConfiguration = nil
         manager.sessionShowOverlay = true  // Reset to default
+
+        // Reset zoom state
+        zoomScale = 1.0
+        lastZoomScale = 1.0
+        panOffset = .zero
+        lastPanOffset = .zero
     }
 
     private func startNewSession() {
@@ -991,6 +1057,206 @@ struct TranslationOverlayText: View {
         let finalWidth = max(boxWidth, 30)
 
         return (fontSize, CGSize(width: finalWidth, height: finalHeight))
+    }
+}
+
+// MARK: - Zoomable Image View
+
+struct ZoomableImageView: View {
+    let image: UIImage
+    @Binding var zoomScale: CGFloat
+    @Binding var lastZoomScale: CGFloat
+    @Binding var panOffset: CGSize
+    @Binding var lastPanOffset: CGSize
+    let showOverlay: Bool
+    let extractedTexts: [ExtractedText]
+    let isProcessing: Bool
+    let isTranslating: Bool
+    let translationProgress: String
+    let overlayFontSize: Double
+    let onSwipe: (DragGesture.Value) -> Void
+
+    // Track if we're currently panning to prevent scroll interference
+    @State private var isPanning = false
+
+    private let minZoom: CGFloat = 1.0
+    private let maxZoom: CGFloat = 5.0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let imageAspect = image.size.width / image.size.height
+            let containerAspect = geometry.size.width / geometry.size.height
+            let imageSize: CGSize = {
+                if imageAspect > containerAspect {
+                    // Image is wider - fit to width
+                    let width = geometry.size.width
+                    let height = width / imageAspect
+                    return CGSize(width: width, height: height)
+                } else {
+                    // Image is taller - fit to height
+                    let height = geometry.size.height
+                    let width = height * imageAspect
+                    return CGSize(width: width, height: height)
+                }
+            }()
+
+            ZStack {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+
+                // Translation overlay
+                if showOverlay && !extractedTexts.isEmpty && !isProcessing && !isTranslating {
+                    translationOverlay(in: imageSize)
+                }
+
+                // Progress overlay on top of image
+                if isProcessing || isTranslating {
+                    Color.black.opacity(0.5)
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.white)
+                        Text(translationProgress.isEmpty ?
+                             (isProcessing ? "Processing..." : "Translating...") :
+                             translationProgress)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 20)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(16)
+                }
+            }
+            .frame(width: imageSize.width, height: imageSize.height)
+            .scaleEffect(zoomScale)
+            .offset(panOffset)
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(radius: 4)
+            // Use highPriorityGesture for pan when zoomed to take priority over scroll view
+            .highPriorityGesture(zoomScale > 1.0 ? panGesture : nil)
+            .simultaneousGesture(zoomGesture)
+            .gesture(doubleTapGesture)
+            .simultaneousGesture(zoomScale <= 1.0 ? swipeGesture : nil)
+        }
+        .aspectRatio(CGSize(width: image.size.width, height: image.size.height), contentMode: .fit)
+        .padding(.horizontal)
+    }
+
+    private func translationOverlay(in size: CGSize) -> some View {
+        ZStack {
+            ForEach(extractedTexts) { text in
+                if !text.translation.isEmpty {
+                    let isVertical = text.boundingBox.height > text.boundingBox.width * 1.5
+                    let boxRect = CGRect(
+                        x: text.boundingBox.minX * size.width,
+                        y: text.boundingBox.minY * size.height,
+                        width: text.boundingBox.width * size.width,
+                        height: text.boundingBox.height * size.height
+                    )
+
+                    TranslationOverlayText(
+                        translation: text.translation,
+                        isVertical: isVertical,
+                        boxRect: boxRect,
+                        baseFontSize: CGFloat(overlayFontSize)
+                    )
+                    .position(
+                        x: boxRect.midX,
+                        y: boxRect.midY
+                    )
+                }
+            }
+        }
+    }
+
+    // Pinch to zoom gesture
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let delta = value / lastZoomScale
+                lastZoomScale = value
+                let newScale = zoomScale * delta
+                zoomScale = min(max(newScale, minZoom), maxZoom)
+            }
+            .onEnded { _ in
+                lastZoomScale = 1.0
+                // Snap back if zoomed out too far
+                if zoomScale < minZoom {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        zoomScale = minZoom
+                        panOffset = .zero
+                    }
+                }
+                // Reset pan offset when zooming back to 1x
+                if zoomScale <= 1.0 {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        panOffset = .zero
+                        lastPanOffset = .zero
+                    }
+                }
+            }
+    }
+
+    // Pan/drag gesture - smoother with minimumDistance of 0
+    private var panGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                isPanning = true
+                // Direct 1:1 mapping for responsive feel
+                panOffset = CGSize(
+                    width: lastPanOffset.width + value.translation.width,
+                    height: lastPanOffset.height + value.translation.height
+                )
+            }
+            .onEnded { value in
+                isPanning = false
+                // Add momentum for smoother feel
+                let velocity = CGSize(
+                    width: value.predictedEndTranslation.width - value.translation.width,
+                    height: value.predictedEndTranslation.height - value.translation.height
+                )
+
+                // Apply momentum with animation
+                withAnimation(.easeOut(duration: 0.3)) {
+                    panOffset = CGSize(
+                        width: lastPanOffset.width + value.translation.width + velocity.width * 0.3,
+                        height: lastPanOffset.height + value.translation.height + velocity.height * 0.3
+                    )
+                }
+                lastPanOffset = panOffset
+            }
+    }
+
+    // Swipe gesture for page navigation (only when not zoomed)
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 50)
+            .onEnded { value in
+                onSwipe(value)
+            }
+    }
+
+    // Double tap to zoom/reset
+    private var doubleTapGesture: some Gesture {
+        TapGesture(count: 2)
+            .onEnded {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if zoomScale > 1.0 {
+                        // Reset zoom
+                        zoomScale = 1.0
+                        panOffset = .zero
+                        lastPanOffset = .zero
+                    } else {
+                        // Zoom in to 2.5x
+                        zoomScale = 2.5
+                    }
+                }
+            }
     }
 }
 
