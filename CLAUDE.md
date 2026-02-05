@@ -18,37 +18,48 @@ NihonGoStart is an iOS Japanese language learning app built with SwiftUI. It pro
 ```
 NihonGoStart/
 ├── NihonGoStart/                    # Main iOS app source
-│   ├── NihonGoStartApp.swift        # App entry point (@main)
-│   ├── ContentView.swift            # Main tab container (Learn/Songs/Comic tabs)
-│   ├── DataModels.swift             # All data models (VocabularyWord, GrammarPoint, etc.)
-│   ├── DataLoader.swift             # JSON data loading utilities
-│   ├── SeedData.swift               # Data access layer
+│   ├── App/                         # App entry points
+│   │   ├── NihonGoStartApp.swift    # App entry point (@main)
+│   │   └── ContentView.swift        # Main tab container (Learn/Songs/Comic tabs)
+│   │
+│   ├── Models/                      # Data models
+│   │   └── DataModels.swift         # All data models (VocabularyWord, GrammarPoint, etc.)
+│   │
+│   ├── Views/                       # UI views organized by feature
+│   │   ├── Learning/                # Learning-related views
+│   │   │   ├── KanaView.swift       # Hiragana/Katakana charts
+│   │   │   ├── KanaFlashcardView.swift  # Kana practice flashcards
+│   │   │   ├── FlashcardView.swift  # Vocabulary flashcards
+│   │   │   ├── PhrasesView.swift    # Common phrases
+│   │   │   ├── SentencesView.swift  # Example sentences
+│   │   │   └── GrammarView.swift    # Grammar guide
+│   │   ├── Comic/                   # Comic translation views
+│   │   │   ├── ComicTranslationView.swift  # Manga OCR & translation UI
+│   │   │   └── BookmarksView.swift  # Saved translations UI
+│   │   └── Songs/                   # Music/Spotify views
+│   │       └── SongsView.swift      # Spotify integration UI
+│   │
+│   ├── Managers/                    # Business logic & API clients
+│   │   ├── ComicTranslationManager.swift  # Azure Vision, OCR, translation logic
+│   │   ├── BookmarksManager.swift   # Bookmarks persistence
+│   │   ├── SpotifyManager.swift     # Spotify API client
+│   │   └── SpeechManager.swift      # Text-to-speech (Japanese)
+│   │
+│   ├── Data/                        # Data loading utilities
+│   │   ├── DataLoader.swift         # JSON data loading utilities
+│   │   └── SeedData.swift           # Data access layer
+│   │
+│   ├── Resources/                   # Static data files
+│   │   ├── kana.json                # Hiragana & katakana characters
+│   │   ├── vocabulary.json          # Vocabulary words by JLPT level
+│   │   ├── phrases.json             # Common phrases by category
+│   │   ├── sentences.json           # Example sentences by topic
+│   │   └── grammar.json             # Grammar points by level/category
+│   │
+│   ├── Support/                     # Support files
+│   │   └── NihonGoStart-Bridging-Header.h
+│   │
 │   ├── Secrets.swift                # API keys (git-ignored, must be created)
-│   │
-│   ├── # Learning Views
-│   ├── KanaView.swift               # Hiragana/Katakana charts
-│   ├── KanaFlashcardView.swift      # Kana practice flashcards
-│   ├── FlashcardView.swift          # Vocabulary flashcards
-│   ├── PhrasesView.swift            # Common phrases
-│   ├── SentencesView.swift          # Example sentences
-│   ├── GrammarView.swift            # Grammar guide
-│   │
-│   ├── # Feature Views & Managers
-│   ├── ComicTranslationView.swift   # Manga OCR & translation UI
-│   ├── ComicTranslationManager.swift # Azure Vision, OCR, translation logic
-│   ├── SongsView.swift              # Spotify integration UI
-│   ├── SpotifyManager.swift         # Spotify API client
-│   ├── BookmarksView.swift          # Saved translations UI
-│   ├── BookmarksManager.swift       # Bookmarks persistence
-│   ├── SpeechManager.swift          # Text-to-speech (Japanese)
-│   │
-│   ├── # Data Files
-│   ├── kana.json                    # Hiragana & katakana characters
-│   ├── vocabulary.json              # Vocabulary words by JLPT level
-│   ├── phrases.json                 # Common phrases by category
-│   ├── sentences.json               # Example sentences by topic
-│   ├── grammar.json                 # Grammar points by level/category
-│   │
 │   └── Assets.xcassets/             # App icons and colors
 │
 ├── NihonGoStart.xcodeproj/          # Xcode project configuration
@@ -195,10 +206,12 @@ docker run -p 8000:8000 manga-ocr-server
 - `@Binding` for child view state propagation
 - Use `.task {}` modifier for async work on view appear
 
-### File Naming
-- Views: `*View.swift` (e.g., `KanaView.swift`)
-- Managers: `*Manager.swift` (e.g., `BookmarksManager.swift`)
-- Data models: `DataModels.swift` (centralized)
+### File Naming & Organization
+- Views: `*View.swift` in `Views/` subfolders (e.g., `Views/Learning/KanaView.swift`)
+- Managers: `*Manager.swift` in `Managers/` (e.g., `Managers/BookmarksManager.swift`)
+- Data models: `Models/DataModels.swift` (centralized)
+- JSON data: `Resources/*.json`
+- App entry: `App/` folder for app-level files
 
 ### JSON Data Format
 All JSON files use arrays of objects with string keys matching Codable struct properties. UUIDs are auto-generated on decode (not stored in JSON).
@@ -206,19 +219,19 @@ All JSON files use arrays of objects with string keys matching Codable struct pr
 ## Common Tasks
 
 ### Adding a New Learning Category
-1. Add data model to `DataModels.swift`
-2. Create JSON file with content
-3. Add loader function to `DataLoader.swift`
-4. Create new View file
-5. Add to `LearnSubTab` enum in `ContentView.swift`
+1. Add data model to `Models/DataModels.swift`
+2. Create JSON file in `Resources/` folder
+3. Add loader function to `Data/DataLoader.swift`
+4. Create new View file in `Views/Learning/`
+5. Add to `LearnSubTab` enum in `App/ContentView.swift`
 
 ### Adding a New Translation Provider
 1. Add API key to `Secrets.swift`
-2. Add translation method to `ComicTranslationManager.swift`
+2. Add translation method to `Managers/ComicTranslationManager.swift`
 3. Update `translateWithGemini()` fallback chain
 
 ### Modifying OCR Behavior
-Key functions in `ComicTranslationManager.swift`:
+Key functions in `Managers/ComicTranslationManager.swift`:
 - `performAzureOCR()` - Azure Vision API call
 - `mergeNearbyTextBlocks()` - Text grouping algorithm
 - `enhanceWithMangaOCR()` - manga-ocr integration
