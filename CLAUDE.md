@@ -19,7 +19,7 @@ NihonGoStart is an iOS Japanese language learning app built with SwiftUI. It pro
 NihonGoStart/
 ├── NihonGoStart/                    # Main iOS app source
 │   ├── App/                         # App entry points
-│   │   ├── NihonGoStartApp.swift    # App entry point (@main)
+│   │   ├── NihonGoStartApp.swift    # App entry point (@main), widget data sync
 │   │   └── ContentView.swift        # Main tab container (Learn/Songs/Comic tabs)
 │   │
 │   ├── Models/                      # Data models
@@ -34,7 +34,7 @@ NihonGoStart/
 │   │   │   ├── SentencesView.swift  # Example sentences
 │   │   │   └── GrammarView.swift    # Grammar guide
 │   │   ├── Comic/                   # Comic translation views
-│   │   │   ├── ComicTranslationView.swift  # Manga OCR & translation UI
+│   │   │   ├── ComicTranslationView.swift  # Manga OCR & translation UI + full screen mode
 │   │   │   └── BookmarksView.swift  # Saved translations UI
 │   │   └── Songs/                   # Music/Spotify views
 │   │       └── SongsView.swift      # Spotify integration UI
@@ -44,6 +44,9 @@ NihonGoStart/
 │   │   ├── BookmarksManager.swift   # Bookmarks persistence
 │   │   ├── SpotifyManager.swift     # Spotify API client
 │   │   └── SpeechManager.swift      # Text-to-speech (Japanese)
+│   │
+│   ├── Shared/                      # Shared code between app and widget
+│   │   └── WidgetDataProvider.swift  # Widget data sync, card generation, App Group storage
 │   │
 │   ├── Data/                        # Data loading utilities
 │   │   ├── DataLoader.swift         # JSON data loading utilities
@@ -61,6 +64,11 @@ NihonGoStart/
 │   │
 │   ├── Secrets.swift                # API keys (git-ignored, must be created)
 │   └── Assets.xcassets/             # App icons and colors
+│
+├── NihonGoStartWidget/              # Widget extension (WidgetKit)
+│   ├── NihonGoStartWidget.swift     # Widget entry, views, bundle
+│   ├── NihonGoStartWidgetIntent.swift # AppIntent configuration (card type selection)
+│   └── Info.plist                   # Widget extension config
 │
 ├── NihonGoStart.xcodeproj/          # Xcode project configuration
 ├── NihonGoStartTests/               # Unit tests
@@ -123,12 +131,14 @@ The app uses shared singleton managers for state management:
 - `BookmarksManager.shared` - Bookmarked translations persistence
 - `SpotifyManager.shared` - Spotify authentication & playback
 - `SpeechManager.shared` - Text-to-speech
+- `WidgetDataProvider.shared` - Widget flashcard data sync via App Groups
 
 All managers inherit from `ObservableObject` and use `@Published` properties for SwiftUI binding.
 
 ### Data Flow
 ```
 JSON Files → DataLoader → SeedData → Views
+JSON Files → WidgetDataProvider → App Group UserDefaults → Widget
 ```
 
 ### View Structure
@@ -149,10 +159,32 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 5. Translation via Azure OpenAI → Gemini → Azure Translator (fallback chain)
 6. Results cached per image hash for performance
 
+### Comic Full Screen Mode
+- Enter via expand button in comic controls bar
+- Full-screen immersive view with black background
+- Swipe left/right to navigate between images (when not zoomed)
+- Pinch to zoom (1x-5x) and pan when zoomed
+- Double-tap to toggle between 1x and 2.5x zoom
+- Single tap to show/hide navigation controls
+- Translation overlay supported in full screen
+- Implemented in `FullScreenComicView` within `ComicTranslationView.swift`
+
+### Widget (WidgetKit)
+- Home screen widget showing Japanese flashcards
+- User configurable card type: Kana, Vocabulary, or Phrase
+- Auto-updates every hour with a new random card
+- Small widget: shows front of card with "tap to reveal" hint
+- Medium widget: shows card front + meaning side-by-side
+- Uses `AppIntentConfiguration` for user card type selection
+- Data shared via App Groups (`group.ziqiyang.NihonGoStart`)
+- `WidgetDataProvider` syncs JSON data from main app to widget storage
+- App syncs data on launch via `NihonGoStartApp.onAppear`
+
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
 - Translation cache persisted across app restarts
 - Bookmarks stored in UserDefaults
+- Widget card data stored in App Group UserDefaults
 
 ## Testing
 
@@ -235,6 +267,21 @@ Key functions in `Managers/ComicTranslationManager.swift`:
 - `performAzureOCR()` - Azure Vision API call
 - `mergeNearbyTextBlocks()` - Text grouping algorithm
 - `enhanceWithMangaOCR()` - manga-ocr integration
+
+### Modifying Widget
+- Widget views: `NihonGoStartWidget/NihonGoStartWidget.swift`
+- Widget configuration intent: `NihonGoStartWidget/NihonGoStartWidgetIntent.swift`
+- Data provider (shared): `NihonGoStart/Shared/WidgetDataProvider.swift`
+- To add new card types: update `WidgetCardType` enum and add generator in `WidgetDataProvider`
+
+### Widget Setup (Xcode)
+The widget extension target must be added in Xcode:
+1. File → New → Target → Widget Extension
+2. Name: `NihonGoStartWidget`, bundle ID: `ziqiyang.NihonGoStart.Widget`
+3. Enable App Groups capability on both main app and widget targets
+4. App Group ID: `group.ziqiyang.NihonGoStart`
+5. Add `Shared/WidgetDataProvider.swift` to both targets
+6. Add JSON resource files (`kana.json`, `vocabulary.json`, `phrases.json`) to widget target
 
 ## Git Workflow
 

@@ -43,6 +43,9 @@ struct ComicTranslationView: View {
     @State private var panOffset: CGSize = .zero
     @State private var lastPanOffset: CGSize = .zero
 
+    // Full screen state
+    @State private var showingFullScreen = false
+
     // Loading state for image upload
     @State private var isLoadingImages = false
     @State private var loadingProgress: String = ""
@@ -189,6 +192,21 @@ struct ComicTranslationView: View {
         }
         .sheet(isPresented: $showingBookmarks) {
             BookmarksView()
+        }
+        .fullScreenCover(isPresented: $showingFullScreen) {
+            FullScreenComicView(
+                images: allImages,
+                currentIndex: Binding(
+                    get: { manager.sessionCurrentPageIndex },
+                    set: { manager.sessionCurrentPageIndex = $0 }
+                ),
+                showOverlay: showOverlay,
+                extractedTexts: manager.extractedTexts,
+                isProcessing: manager.isProcessing,
+                isTranslating: manager.isTranslating,
+                translationProgress: manager.translationProgress,
+                overlayFontSize: overlayFontSize
+            )
         }
         .onDisappear {
             // Auto-save current session when navigating away
@@ -457,6 +475,16 @@ struct ComicTranslationView: View {
                         .background(Color.gray.opacity(0.8))
                         .cornerRadius(12)
                     }
+                }
+
+                // Full screen button
+                Button(action: { showingFullScreen = true }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .padding(6)
+                        .background(Color.gray.opacity(0.8))
+                        .cornerRadius(8)
                 }
 
                 Spacer()
@@ -1155,10 +1183,22 @@ struct ZoomableImageView: View {
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .shadow(radius: 4)
+            // Double-tap has highest priority so it always works for zoom reset
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if zoomScale > 1.0 {
+                        zoomScale = 1.0
+                        panOffset = .zero
+                        lastPanOffset = .zero
+                        lastZoomScale = 1.0
+                    } else {
+                        zoomScale = 2.5
+                    }
+                }
+            }
             // Use highPriorityGesture for pan when zoomed to take priority over scroll view
             .highPriorityGesture(zoomScale > 1.0 ? panGesture : nil)
             .simultaneousGesture(zoomGesture)
-            .gesture(doubleTapGesture)
             .simultaneousGesture(zoomScale <= 1.0 ? swipeGesture : nil)
         }
         .aspectRatio(CGSize(width: image.size.width, height: image.size.height), contentMode: .fit)
@@ -1258,23 +1298,6 @@ struct ZoomableImageView: View {
             }
     }
 
-    // Double tap to zoom/reset
-    private var doubleTapGesture: some Gesture {
-        TapGesture(count: 2)
-            .onEnded {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    if zoomScale > 1.0 {
-                        // Reset zoom
-                        zoomScale = 1.0
-                        panOffset = .zero
-                        lastPanOffset = .zero
-                    } else {
-                        // Zoom in to 2.5x
-                        zoomScale = 2.5
-                    }
-                }
-            }
-    }
 }
 
 // MARK: - Extracted Text Row
@@ -1726,6 +1749,287 @@ struct JishoWordRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Full Screen Comic View
+
+struct FullScreenComicView: View {
+    let images: [UIImage]
+    @Binding var currentIndex: Int
+    let showOverlay: Bool
+    let extractedTexts: [ExtractedText]
+    let isProcessing: Bool
+    let isTranslating: Bool
+    let translationProgress: String
+    let overlayFontSize: Double
+
+    @Environment(\.dismiss) var dismiss
+    @State private var fsZoomScale: CGFloat = 1.0
+    @State private var fsLastZoomScale: CGFloat = 1.0
+    @State private var fsPanOffset: CGSize = .zero
+    @State private var fsLastPanOffset: CGSize = .zero
+    @State private var showControls = true
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if !images.isEmpty && currentIndex < images.count {
+                GeometryReader { geometry in
+                    let image = images[currentIndex]
+                    let imageAspect = image.size.width / image.size.height
+                    let containerAspect = geometry.size.width / geometry.size.height
+                    let imageSize: CGSize = {
+                        if imageAspect > containerAspect {
+                            let width = geometry.size.width
+                            let height = width / imageAspect
+                            return CGSize(width: width, height: height)
+                        } else {
+                            let height = geometry.size.height
+                            let width = height * imageAspect
+                            return CGSize(width: width, height: height)
+                        }
+                    }()
+
+                    ZStack {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+
+                        // Translation overlay
+                        if showOverlay && !extractedTexts.isEmpty && !isProcessing && !isTranslating {
+                            ZStack {
+                                ForEach(extractedTexts) { text in
+                                    if !text.translation.isEmpty {
+                                        let isVertical = text.boundingBox.height > text.boundingBox.width * 1.5
+                                        let boxRect = CGRect(
+                                            x: text.boundingBox.minX * imageSize.width,
+                                            y: text.boundingBox.minY * imageSize.height,
+                                            width: text.boundingBox.width * imageSize.width,
+                                            height: text.boundingBox.height * imageSize.height
+                                        )
+
+                                        TranslationOverlayText(
+                                            translation: text.translation,
+                                            isVertical: isVertical,
+                                            boxRect: boxRect,
+                                            baseFontSize: CGFloat(overlayFontSize)
+                                        )
+                                        .position(x: boxRect.midX, y: boxRect.midY)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Progress overlay
+                        if isProcessing || isTranslating {
+                            Color.black.opacity(0.5)
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                    .scaleEffect(1.5)
+                                    .tint(.white)
+                                Text(translationProgress.isEmpty ?
+                                     (isProcessing ? "Processing..." : "Translating...") :
+                                     translationProgress)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(16)
+                        }
+                    }
+                    .frame(width: imageSize.width, height: imageSize.height)
+                    .scaleEffect(fsZoomScale)
+                    .offset(fsPanOffset)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    .onTapGesture(count: 2) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if fsZoomScale > 1.0 {
+                                fsZoomScale = 1.0
+                                fsPanOffset = .zero
+                                fsLastPanOffset = .zero
+                                fsLastZoomScale = 1.0
+                            } else {
+                                fsZoomScale = 2.5
+                            }
+                        }
+                    }
+                    .onTapGesture(count: 1) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showControls.toggle()
+                        }
+                    }
+                    .highPriorityGesture(fsZoomScale > 1.0 ? fsPanGesture : nil)
+                    .simultaneousGesture(fsZoomGesture)
+                    .simultaneousGesture(fsZoomScale <= 1.0 ? fsSwipeGesture : nil)
+                }
+                .ignoresSafeArea()
+            }
+
+            // Controls overlay
+            if showControls {
+                VStack {
+                    // Top bar
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.white)
+                                .shadow(radius: 4)
+                        }
+
+                        Spacer()
+
+                        if images.count > 1 {
+                            Text("\(currentIndex + 1) / \(images.count)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(12)
+                        }
+
+                        Spacer()
+
+                        // Zoom indicator
+                        if fsZoomScale > 1.0 {
+                            Button(action: resetFullScreenZoom) {
+                                Text("\(Int(fsZoomScale * 100))%")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.black.opacity(0.6))
+                                    .cornerRadius(8)
+                            }
+                        } else {
+                            Color.clear.frame(width: 30)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                    Spacer()
+
+                    // Bottom navigation (only when not zoomed)
+                    if images.count > 1 && fsZoomScale <= 1.0 {
+                        HStack(spacing: 40) {
+                            Button(action: previousFullScreenPage) {
+                                Image(systemName: "chevron.left.circle.fill")
+                                    .font(.title)
+                                    .foregroundColor(currentIndex > 0 ? .white : .gray)
+                                    .shadow(radius: 4)
+                            }
+                            .disabled(currentIndex == 0)
+
+                            Button(action: nextFullScreenPage) {
+                                Image(systemName: "chevron.right.circle.fill")
+                                    .font(.title)
+                                    .foregroundColor(currentIndex < images.count - 1 ? .white : .gray)
+                                    .shadow(radius: 4)
+                            }
+                            .disabled(currentIndex >= images.count - 1)
+                        }
+                        .padding(.bottom, 30)
+                    }
+                }
+            }
+        }
+        .statusBarHidden(true)
+    }
+
+    // MARK: - Full Screen Gestures
+
+    private var fsZoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let delta = value / fsLastZoomScale
+                fsLastZoomScale = value
+                let newScale = fsZoomScale * delta
+                fsZoomScale = min(max(newScale, 1.0), 5.0)
+            }
+            .onEnded { _ in
+                fsLastZoomScale = 1.0
+                if fsZoomScale < 1.0 {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        fsZoomScale = 1.0
+                        fsPanOffset = .zero
+                    }
+                }
+                if fsZoomScale <= 1.0 {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        fsPanOffset = .zero
+                        fsLastPanOffset = .zero
+                    }
+                }
+            }
+    }
+
+    private var fsPanGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                fsPanOffset = CGSize(
+                    width: fsLastPanOffset.width + value.translation.width,
+                    height: fsLastPanOffset.height + value.translation.height
+                )
+            }
+            .onEnded { value in
+                let velocity = CGSize(
+                    width: value.predictedEndTranslation.width - value.translation.width,
+                    height: value.predictedEndTranslation.height - value.translation.height
+                )
+                withAnimation(.easeOut(duration: 0.3)) {
+                    fsPanOffset = CGSize(
+                        width: fsLastPanOffset.width + value.translation.width + velocity.width * 0.3,
+                        height: fsLastPanOffset.height + value.translation.height + velocity.height * 0.3
+                    )
+                }
+                fsLastPanOffset = fsPanOffset
+            }
+    }
+
+    private var fsSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 50)
+            .onEnded { value in
+                let horizontalAmount = value.translation.width
+                let verticalAmount = value.translation.height
+                guard abs(horizontalAmount) > abs(verticalAmount) else { return }
+
+                if horizontalAmount < -50 {
+                    nextFullScreenPage()
+                } else if horizontalAmount > 50 {
+                    previousFullScreenPage()
+                }
+            }
+    }
+
+    // MARK: - Full Screen Actions
+
+    private func resetFullScreenZoom() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            fsZoomScale = 1.0
+            fsLastZoomScale = 1.0
+            fsPanOffset = .zero
+            fsLastPanOffset = .zero
+        }
+    }
+
+    private func previousFullScreenPage() {
+        guard currentIndex > 0 else { return }
+        resetFullScreenZoom()
+        currentIndex -= 1
+    }
+
+    private func nextFullScreenPage() {
+        guard currentIndex < images.count - 1 else { return }
+        resetFullScreenZoom()
+        currentIndex += 1
     }
 }
 
