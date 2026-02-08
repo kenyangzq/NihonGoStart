@@ -90,27 +90,28 @@ struct FlashcardWidgetView: View {
                 .foregroundColor(.secondary)
                 .lineLimit(1)
 
-            // Bottom row: reveal/next buttons
-            HStack(spacing: 0) {
-                Button(intent: RevealMeaningIntent()) {
-                    HStack(spacing: 4) {
-                        Image(systemName: entry.showMeaning ? "eye.slash" : "eye")
-                            .font(.system(size: 12))
-                        Text(entry.showMeaning ? "Hide" : "Reveal")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, minHeight: 28)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
+            // Single interactive button (small widgets support one tap zone)
+            // Unrevealed → tap to reveal; Revealed → tap to go to next card
+            if entry.showMeaning {
                 Button(intent: SwapCardIntent()) {
                     HStack(spacing: 4) {
                         Text("Next")
                             .font(.system(size: 12, weight: .medium))
                         Image(systemName: "arrow.right")
                             .font(.system(size: 12))
+                    }
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, minHeight: 28)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button(intent: RevealMeaningIntent()) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 12))
+                        Text("Reveal")
+                            .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, minHeight: 28)
@@ -175,9 +176,6 @@ struct FlashcardWidgetView: View {
                 } else {
                     Image(systemName: "questionmark.circle")
                         .font(.title)
-                        .foregroundColor(.secondary)
-                    Text("Tap Reveal")
-                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
 

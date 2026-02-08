@@ -66,8 +66,9 @@ NihonGoStart/
 │   └── Assets.xcassets/             # App icons and colors
 │
 ├── NihonGoStartWidget/              # Widget extension (WidgetKit)
-│   ├── NihonGoStartWidget.swift     # Widget entry, views, bundle
-│   ├── NihonGoStartWidgetIntent.swift # AppIntent configuration (card type selection)
+│   ├── NihonGoStartWidget.swift     # Widget entry & views (FlashcardWidgetView)
+│   ├── NihonGoStartWidgetBundle.swift # Widget bundle entry point (@main)
+│   ├── AppIntent.swift              # AppIntents: config, timeline provider, interactive intents
 │   └── Info.plist                   # Widget extension config
 │
 ├── NihonGoStart.xcodeproj/          # Xcode project configuration
@@ -173,12 +174,15 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 - Home screen widget showing Japanese flashcards
 - User configurable card type: Kana, Vocabulary, or Phrase
 - Auto-updates every hour with a new random card
-- Small widget: shows front of card with "tap to reveal" hint
-- Medium widget: shows card front + meaning side-by-side
+- Interactive buttons: Reveal/Hide meaning toggle and Next card swap (via `AppIntent`)
+- Small widget: shows card front with icon-only Reveal and Next buttons (no text labels)
+- Medium widget: shows card front on left, meaning (or `?` placeholder) on right, with labeled Reveal/Hide and Next buttons
 - Uses `AppIntentConfiguration` for user card type selection
+- `WidgetDataProvider.updateCardTypeIfNeeded(_:)` prevents card regeneration on every timeline reload (only regenerates when card type actually changes, directly updates UserDefaults to avoid triggering unwanted card swaps via setter)
 - Data shared via App Groups (`group.ziqiyang.NihonGoStart`)
 - `WidgetDataProvider` syncs JSON data from main app to widget storage
 - App syncs data on launch via `NihonGoStartApp.onAppear`
+- **Bug fix:** Reveal/Hide button now only toggles meaning visibility without advancing to next card (fixed by avoiding `selectedCardType` setter in `updateCardTypeIfNeeded`)
 
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
@@ -248,6 +252,16 @@ docker run -p 8000:8000 manga-ocr-server
 ### JSON Data Format
 All JSON files use arrays of objects with string keys matching Codable struct properties. UUIDs are auto-generated on decode (not stored in JSON).
 
+### Documentation
+- **Always update CLAUDE.md** after making any code changes that affect:
+  - Architecture or file structure
+  - New features or functionality
+  - API changes or new dependencies
+  - Bug fixes or behavior changes
+  - Configuration or setup instructions
+- Keep CLAUDE.md as the single source of truth for project understanding
+- Update relevant sections immediately when implementing features
+
 ## Common Tasks
 
 ### Adding a New Learning Category
@@ -270,9 +284,11 @@ Key functions in `Managers/ComicTranslationManager.swift`:
 
 ### Modifying Widget
 - Widget views: `NihonGoStartWidget/NihonGoStartWidget.swift`
-- Widget configuration intent: `NihonGoStartWidget/NihonGoStartWidgetIntent.swift`
+- Widget bundle: `NihonGoStartWidget/NihonGoStartWidgetBundle.swift`
+- Intents & timeline provider: `NihonGoStartWidget/AppIntent.swift` (includes `FlashcardConfigurationIntent`, `ConfigurableFlashcardProvider`, `SwapCardIntent`, `RevealMeaningIntent`)
 - Data provider (shared): `NihonGoStart/Shared/WidgetDataProvider.swift`
 - To add new card types: update `WidgetCardType` enum and add generator in `WidgetDataProvider`
+- To add new interactive buttons: create a new `AppIntent` struct in `AppIntent.swift` and add a `Button(intent:)` in the widget view
 
 ### Widget Setup (Xcode)
 The widget extension target must be added in Xcode:

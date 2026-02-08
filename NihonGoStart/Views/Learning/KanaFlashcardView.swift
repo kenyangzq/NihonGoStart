@@ -22,7 +22,7 @@ struct KanaFlashcardView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.top)
-            .onChange(of: selectedType) { _ in
+            .onChange(of: selectedType) {
                 resetDeck()
             }
 

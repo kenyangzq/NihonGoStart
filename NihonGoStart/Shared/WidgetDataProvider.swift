@@ -53,6 +53,12 @@ class WidgetDataProvider {
 
     private init() {}
 
+    /// Force UserDefaults to flush pending writes to disk.
+    /// Call before reloadTimelines to ensure the timeline provider reads fresh data.
+    func synchronize() {
+        sharedDefaults?.synchronize()
+    }
+
     // MARK: - Card Type Selection
 
     var selectedCardType: WidgetCardType {
@@ -68,6 +74,22 @@ class WidgetDataProvider {
             // Regenerate cards for the new type and pick a new card
             regenerateCards(for: newValue)
         }
+    }
+
+    /// Only updates the card type and regenerates cards when the type actually changes.
+    /// Avoids regenerating (and picking a new random card) on every timeline reload.
+    func updateCardTypeIfNeeded(_ type: WidgetCardType) {
+        let stored = sharedDefaults?.string(forKey: cardTypeKey)
+        if stored == nil {
+            // First time: persist the type without regenerating a new card
+            sharedDefaults?.set(type.rawValue, forKey: cardTypeKey)
+            return
+        }
+        guard type.rawValue != stored else { return }
+        // Type has changed: update UserDefaults and regenerate cards
+        // Don't use selectedCardType setter to avoid double-regeneration
+        sharedDefaults?.set(type.rawValue, forKey: cardTypeKey)
+        regenerateCards(for: type)
     }
 
     // MARK: - Show Meaning State

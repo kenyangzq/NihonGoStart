@@ -55,7 +55,7 @@ struct ConfigurableFlashcardProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: FlashcardConfigurationIntent, in context: Context) async -> FlashcardEntry {
         let widgetType = mapIntentType(configuration.cardType)
         let provider = WidgetDataProvider.shared
-        provider.selectedCardType = widgetType
+        provider.updateCardTypeIfNeeded(widgetType)
         let card = provider.getCurrentCard()
         let showMeaning = provider.showMeaning
         return FlashcardEntry(date: Date(), card: card, cardType: widgetType, showMeaning: showMeaning)
@@ -64,7 +64,7 @@ struct ConfigurableFlashcardProvider: AppIntentTimelineProvider {
     func timeline(for configuration: FlashcardConfigurationIntent, in context: Context) async -> Timeline<FlashcardEntry> {
         let widgetType = mapIntentType(configuration.cardType)
         let provider = WidgetDataProvider.shared
-        provider.selectedCardType = widgetType
+        provider.updateCardTypeIfNeeded(widgetType)
 
         let now = Date()
         let showMeaning = provider.showMeaning
@@ -102,6 +102,7 @@ struct SwapCardIntent: AppIntent {
         let provider = WidgetDataProvider.shared
         provider.showMeaning = false  // Reset reveal state when swapping
         _ = provider.swapToNextCard()
+        provider.synchronize()
         WidgetCenter.shared.reloadTimelines(ofKind: "NihonGoStartConfigurableWidget")
         return .result()
     }
@@ -116,6 +117,7 @@ struct RevealMeaningIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let provider = WidgetDataProvider.shared
         _ = provider.toggleShowMeaning()
+        provider.synchronize()
         WidgetCenter.shared.reloadTimelines(ofKind: "NihonGoStartConfigurableWidget")
         return .result()
     }

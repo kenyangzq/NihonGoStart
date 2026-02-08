@@ -21,7 +21,7 @@ struct FlashcardView: View {
             }
             .pickerStyle(.segmented)
             .padding()
-            .onChange(of: selectedLevel) { _ in
+            .onChange(of: selectedLevel) {
                 resetDeck()
             }
 
