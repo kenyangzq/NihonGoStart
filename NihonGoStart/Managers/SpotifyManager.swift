@@ -7,8 +7,22 @@ class SpotifyManager: ObservableObject {
 
     // IMPORTANT: Replace these with your own Spotify API credentials
     // Get them from https://developer.spotify.com/dashboard
-    private let clientId = "9c85d94e28244e0cb680a3ecda8c888f"
-    private let clientSecret = "210934ed4df34a1e8ae8985513aba973"
+    // Or add them to Secrets.swift
+    private let clientId: String
+    private let clientSecret: String
+
+    init() {
+        // Try to get credentials from Secrets.swift first, fallback to placeholder
+        if Secrets.spotifyClientId != "" && Secrets.spotifyClientSecret != "" {
+            self.clientId = Secrets.spotifyClientId
+            self.clientSecret = Secrets.spotifyClientSecret
+            self.needsConfiguration = false
+        } else {
+            self.clientId = "YOUR_CLIENT_ID"
+            self.clientSecret = "YOUR_CLIENT_SECRET"
+            self.needsConfiguration = true
+        }
+    }
 
     @Published var accessToken: String?
     @Published var isAuthenticated = false
@@ -21,13 +35,6 @@ class SpotifyManager: ObservableObject {
     private var audioPlayer: AVPlayer?
     @Published var isPlaying = false
     @Published var currentTrack: SpotifyTrack?
-
-    private init() {
-        // Check if credentials are configured
-        if clientId == "YOUR_CLIENT_ID" || clientSecret == "YOUR_CLIENT_SECRET" {
-            needsConfiguration = true
-        }
-    }
 
     // MARK: - Authentication
 
