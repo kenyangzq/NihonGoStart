@@ -153,12 +153,14 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 ## Key Features Implementation
 
 ### Comic Translation Pipeline
-1. User uploads image/PDF
+1. User uploads image/PDF (up to 20 images at once)
 2. Azure AI Vision detects text regions (bounding boxes)
 3. (Optional) manga-ocr backend enhances text recognition
 4. Text merging algorithm groups nearby text blocks
 5. Translation via Azure OpenAI → Gemini → Azure Translator (fallback chain)
 6. Results cached per image hash for performance
+7. **Smart prefetching**: Only processes up to 3 images at a time (current + next 2)
+8. **No-text caching**: Images with no detected Japanese text are cached to avoid re-processing
 
 ### Comic Full Screen Mode
 - Enter via expand button in comic controls bar
@@ -169,6 +171,19 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 - Single tap to show/hide navigation controls
 - Translation overlay supported in full screen
 - Implemented in `FullScreenComicView` within `ComicTranslationView.swift`
+
+### Comic Session Management
+- **Merge Sessions**: Combine multiple saved sessions into one larger session
+  - Access via "Merge" button in saved sessions section (when 2+ sessions exist)
+  - Select multiple sessions to merge, combined in chronological order
+  - Useful for combining chapters or volumes
+- **Reorder Images**: Rearrange images/pages within a session
+  - Access via "Reorder" button in controls bar (when 2+ images exist)
+  - Use up/down arrows to move individual images
+  - Clears translation cache after reordering to ensure correct indexing
+- **Image Upload Limit**: Up to 20 images per session (increased from 9)
+- **Smart Background Processing**: Only prefetches up to 3 images total (current + next 2) to save resources
+- **No-Text Detection**: Images without Japanese text are cached and skipped on subsequent views
 
 ### Widget (WidgetKit)
 - Home screen widget showing Japanese flashcards
@@ -187,6 +202,7 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
 - Translation cache persisted across app restarts
+- Cache includes `hasNoText` flag to skip re-processing images without Japanese text
 - Bookmarks stored in UserDefaults
 - Widget card data stored in App Group UserDefaults
 
@@ -316,6 +332,7 @@ Work on feature branches, merge to main via PR.
 - Ensure image has clear, readable text
 - Azure Vision works best with high-contrast images
 - manga-ocr backend improves recognition for manga fonts
+- **Note**: Images with no detected text are cached. To re-process, use the "Retry" button which clears the cache for that image
 
 ### Translation Not Working
 1. Check Secrets.swift has valid API keys
