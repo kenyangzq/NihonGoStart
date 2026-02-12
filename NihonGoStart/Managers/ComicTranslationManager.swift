@@ -8,6 +8,7 @@ struct ImageTranslationCache {
     let imageHash: Int
     var extractedTexts: [ExtractedText]
     var isProcessed: Bool
+    var hasNoText: Bool  // Track if image has no Japanese text
     var translatedLanguages: Set<String>  // Track which languages have been translated
 
     // Store translations per language
@@ -96,7 +97,7 @@ class ComicTranslationManager: ObservableObject {
     private let azureEndpoint = Secrets.azureEndpoint
 
     // File paths for session storage
-    private var sessionsDirectory: URL {
+    var sessionsDirectory: URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         let sessionsDir = paths[0].appendingPathComponent("ComicSessions", isDirectory: true)
         try? FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
@@ -292,6 +293,7 @@ class ComicTranslationManager: ObservableObject {
                     imageHash: hash,
                     extractedTexts: extractedTexts,
                     isProcessed: true,
+                    hasNoText: extractedTexts.isEmpty,
                     translatedLanguages: Set(savedCache.translationsByLanguage.keys),
                     translationsByLanguage: savedCache.translationsByLanguage
                 )
@@ -1261,6 +1263,7 @@ class ComicTranslationManager: ObservableObject {
             imageHash: hash,
             extractedTexts: extractedTexts,
             isProcessed: true,
+            hasNoText: false,
             translatedLanguages: [],
             translationsByLanguage: [:]
         )
@@ -1271,6 +1274,7 @@ class ComicTranslationManager: ObservableObject {
             ExtractedText(japanese: text.japanese, translation: "", boundingBox: text.boundingBox)
         }
         cache.isProcessed = true
+        cache.hasNoText = extractedTexts.isEmpty
 
         // If language provided, cache the translations
         if let lang = language {
@@ -1289,6 +1293,16 @@ class ComicTranslationManager: ObservableObject {
 
         // Load base extracted texts
         extractedTexts = cached.extractedTexts
+
+        // If this image has no text, clear any previous error message
+        if cached.hasNoText {
+            errorMessage = nil
+            shouldTriggerTranslation = false
+            isProcessing = false
+            isTranslating = false
+            translationProgress = ""
+            return true
+        }
 
         // If language specified and we have cached translations, apply them
         if let lang = language, let translations = cached.translationsByLanguage[lang] {
@@ -1369,6 +1383,18 @@ class ComicTranslationManager: ObservableObject {
         if texts.isEmpty {
             isProcessing = false
             translationProgress = ""
+
+            // Cache that this image has no text to avoid re-detecting
+            let hash = hashForImage(image)
+            translationCache[hash] = ImageTranslationCache(
+                imageHash: hash,
+                extractedTexts: [],
+                isProcessed: true,
+                hasNoText: true,
+                translatedLanguages: [],
+                translationsByLanguage: [:]
+            )
+
             if errorMessage == nil {
                 errorMessage = "No Japanese text detected in the image"
             }
@@ -1449,6 +1475,7 @@ class ComicTranslationManager: ObservableObject {
                     imageHash: hash,
                     extractedTexts: enhancedTexts,
                     isProcessed: true,
+                    hasNoText: enhancedTexts.isEmpty,
                     translatedLanguages: [],
                     translationsByLanguage: [:]
                 )
@@ -1477,6 +1504,19 @@ class ComicTranslationManager: ObservableObject {
                         imageHash: hash,
                         extractedTexts: enhancedTexts,
                         isProcessed: true,
+                        hasNoText: enhancedTexts.isEmpty,
+                        translatedLanguages: [],
+                        translationsByLanguage: [:]
+                    )
+                }
+            } else {
+                // Mark as processed with no text
+                await MainActor.run {
+                    translationCache[hash] = ImageTranslationCache(
+                        imageHash: hash,
+                        extractedTexts: [],
+                        isProcessed: true,
+                        hasNoText: true,
                         translatedLanguages: [],
                         translationsByLanguage: [:]
                     )

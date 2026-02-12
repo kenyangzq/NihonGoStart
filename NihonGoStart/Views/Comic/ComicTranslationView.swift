@@ -50,11 +50,16 @@ struct ComicTranslationView: View {
     @State private var isLoadingImages = false
     @State private var loadingProgress: String = ""
 
+    // Session management state
+    @State private var showingMergeSessions = false
+    @State private var showingReorderImages = false
+    @State private var selectedSessionsForMerge: Set<UUID> = []
+
     // Font size preference (persisted)
     @AppStorage("overlayFontSize") private var overlayFontSize: Double = 12.0
 
     private let speechManager = SpeechManager.shared
-    private let maxImageSelection = 9
+    private let maxImageSelection = 20
 
     // Bindings to manager's session state for persistence
     private var targetLanguageBinding: Binding<TargetLanguage> {
@@ -193,6 +198,16 @@ struct ComicTranslationView: View {
         .sheet(isPresented: $showingBookmarks) {
             BookmarksView()
         }
+        .sheet(isPresented: $showingMergeSessions) {
+            MergeSessionsView(onMerge: mergeSelectedSessions)
+        }
+        .sheet(isPresented: $showingReorderImages) {
+            ReorderImagesView(
+                images: allImages,
+                isPDF: !manager.sessionPDFPages.isEmpty,
+                onReorder: reorderImages
+            )
+        }
         .fullScreenCover(isPresented: $showingFullScreen) {
             FullScreenComicView(
                 images: allImages,
@@ -311,6 +326,20 @@ struct ComicTranslationView: View {
                 Text("\(manager.savedSessions.count)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                // Merge sessions button
+                if manager.savedSessions.count > 1 {
+                    Button(action: { showingMergeSessions = true }) {
+                        Text("Merge")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.blue)
+                            .cornerRadius(8)
+                    }
+                }
             }
             .padding(.horizontal)
 
@@ -520,6 +549,16 @@ struct ComicTranslationView: View {
                         .fontWeight(.medium)
                 }
                 .foregroundColor(.blue)
+
+                // Reorder button
+                if totalPages > 1 {
+                    Button(action: { showingReorderImages = true }) {
+                        Label("Reorder", systemImage: "arrow.up.arrow.down")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.purple)
+                }
             }
             .padding(.horizontal)
         }
@@ -747,22 +786,33 @@ struct ComicTranslationView: View {
             loadingProgress = ""
         }
 
-        // Start background processing for remaining images in PARALLEL
-        if images.count > 1 {
-            let remainingImages = Array(images.dropFirst())
-            Task.detached {
-                await withTaskGroup(of: Void.self) { group in
-                    for image in remainingImages {
-                        group.addTask {
-                            await manager.processAndTranslateInBackground(image, language: currentLanguage)
-                        }
-                    }
-                }
+        // Process the first image
+        await manager.processImage(images[0])
+
+        // Prefetch next images (up to 2)
+        prefetchNextImages()
+    }
+
+    /// Prefetch next images when current page changes
+    private func prefetchNextImages() {
+        let images = allImages
+        let currentIndex = manager.sessionCurrentPageIndex
+        let currentLanguage = targetLanguage.rawValue
+
+        // Prefetch up to 2 next images (total 3 including current)
+        let prefetchCount = 2
+        let startIndex = currentIndex + 1
+        let endIndex = min(startIndex + prefetchCount, images.count)
+
+        guard startIndex < endIndex else { return }
+
+        let imagesToPrefetch = Array(images[startIndex..<endIndex])
+
+        Task.detached {
+            for image in imagesToPrefetch {
+                await manager.processAndTranslateInBackground(image, language: currentLanguage)
             }
         }
-
-        // Process the first image (this runs in parallel with background tasks)
-        await manager.processImage(images[0])
     }
 
     private func handlePDFSelection(_ url: URL) {
@@ -792,24 +842,11 @@ struct ComicTranslationView: View {
 
         guard let firstPage = pages.first else { return }
 
-        // Start background processing for remaining pages in PARALLEL
-        if pages.count > 1 {
-            let remainingPages = Array(pages.dropFirst())
-            Task.detached {
-                await withTaskGroup(of: Void.self) { group in
-                    for page in remainingPages {
-                        group.addTask {
-                            await manager.processAndTranslateInBackground(page, language: currentLanguage)
-                        }
-                    }
-                }
-            }
-        }
+        // Process the first page
+        await manager.processImage(firstPage)
 
-        // Process the first page (this runs in parallel with background tasks)
-        Task {
-            await manager.processImage(firstPage)
-        }
+        // Prefetch next pages (up to 2)
+        prefetchNextImages()
     }
 
     private func previousPage() {
@@ -840,6 +877,8 @@ struct ComicTranslationView: View {
 
         Task {
             await manager.processImage(image)
+            // Prefetch next images after current page is loaded
+            prefetchNextImages()
         }
     }
 
@@ -1027,6 +1066,82 @@ struct ComicTranslationView: View {
         }
 
         return minSize
+    }
+
+    // MARK: - Merge Sessions
+
+    private func mergeSelectedSessions(_ sessionIds: Set<UUID>) {
+        guard sessionIds.count > 1 else { return }
+
+        // Save current session if there is one
+        if !allImages.isEmpty {
+            manager.sessionTargetLanguage = targetLanguage.rawValue
+            manager.saveCurrentSession()
+        }
+
+        // Load images from all selected sessions
+        var mergedImages: [UIImage] = []
+        var targetLanguage = "zh-Hans"  // Default
+
+        for sessionId in sessionIds.sorted(by: { $0.uuidString < $1.uuidString }) {
+            if let session = manager.savedSessions.first(where: { $0.id == sessionId }) {
+                let sessionDir = manager.sessionsDirectory.appendingPathComponent(session.id.uuidString)
+
+                for fileName in session.imageFileNames {
+                    let fileURL = sessionDir.appendingPathComponent(fileName)
+                    if let data = try? Data(contentsOf: fileURL),
+                       let image = UIImage(data: data) {
+                        mergedImages.append(image)
+                    }
+                }
+
+                targetLanguage = session.targetLanguage
+            }
+        }
+
+        guard !mergedImages.isEmpty else { return }
+
+        // Clear and setup new merged session
+        manager.clearSession()
+        manager.sessionImages = mergedImages
+        manager.sessionPDFPages = []
+        manager.sessionTargetLanguage = targetLanguage
+        manager.sessionCurrentPageIndex = 0
+
+        // Process first image
+        if let firstImage = mergedImages.first {
+            Task {
+                await manager.processImage(firstImage, language: targetLanguage)
+                prefetchNextImages()
+            }
+        }
+    }
+
+    // MARK: - Reorder Images
+
+    private func reorderImages(to newOrder: [UIImage]) {
+        guard !manager.sessionPDFPages.isEmpty else {
+            // Regular images
+            manager.sessionImages = newOrder
+        } {
+            // PDF pages
+            manager.sessionPDFPages = newOrder
+        }
+
+        // Update current page index to stay within bounds
+        if manager.sessionCurrentPageIndex >= newOrder.count {
+            manager.sessionCurrentPageIndex = max(0, newOrder.count - 1)
+        }
+
+        // Clear cache since image order has changed
+        manager.clearCache()
+
+        // Reload current page
+        if let image = currentDisplayImage {
+            Task {
+                await manager.processImage(image, language: targetLanguage.rawValue)
+            }
+        }
     }
 }
 
@@ -2030,6 +2145,262 @@ struct FullScreenComicView: View {
         guard currentIndex < images.count - 1 else { return }
         resetFullScreenZoom()
         currentIndex += 1
+    }
+}
+
+// MARK: - Merge Sessions View
+
+struct MergeSessionsView: View {
+    @Environment(\.dismiss) var dismiss
+    @StateObject private var manager = ComicTranslationManager.shared
+    @State private var selectedSessionIds: Set<UUID> = []
+
+    let onMerge: (Set<UUID>) -> Void
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 12) {
+                    Text("Select sessions to merge")
+                        .font(.headline)
+                        .padding(.top)
+
+                    Text("Selected sessions will be combined into one. The order will be based on the session creation date.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                        .multilineTextAlignment(.center)
+
+                    ForEach(manager.savedSessions) { session in
+                        MergeSessionRow(
+                            session: session,
+                            isSelected: selectedSessionIds.contains(session.id),
+                            onTap: {
+                                if selectedSessionIds.contains(session.id) {
+                                    selectedSessionIds.remove(session.id)
+                                } else {
+                                    selectedSessionIds.insert(session.id)
+                                }
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical)
+            }
+            .navigationTitle("Merge Sessions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Merge") {
+                        onMerge(selectedSessionIds)
+                        dismiss()
+                    }
+                    .disabled(selectedSessionIds.count < 2)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+struct MergeSessionRow: View {
+    let session: SavedComicSession
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    @StateObject private var manager = ComicTranslationManager.shared
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Selection indicator
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title2)
+                .foregroundColor(isSelected ? .blue : .gray)
+
+            // Thumbnail with page count badge
+            ZStack(alignment: .bottomTrailing) {
+                if let thumbnail = manager.getThumbnail(for: session) {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 50, height: 70)
+                        .cornerRadius(6)
+                        .clipped()
+                } else {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 50, height: 70)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(.gray)
+                        )
+                }
+
+                Text("\(session.imageCount)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(4)
+                    .offset(x: 2, y: 2)
+            }
+
+            // Session info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                Text(session.displayDate)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Text(session.targetLanguage == "en" ? "English" : "Chinese")
+                    .font(.caption2)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.8))
+                    .cornerRadius(4)
+            }
+
+            Spacer()
+        }
+        .padding(12)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+    }
+}
+
+// MARK: - Reorder Images View
+
+struct ReorderImagesView: View {
+    @Environment(\.dismiss) var dismiss
+    let images: [UIImage]
+    let isPDF: Bool
+    let onReorder: ([UIImage]) -> Void
+
+    @State private var reorderedImages: [UIImage]
+
+    init(images: [UIImage], isPDF: Bool, onReorder: @escaping ([UIImage]) -> Void) {
+        self.images = images
+        self.isPDF = isPDF
+        self.onReorder = onReorder
+        self._reorderedImages = State(initialValue: images)
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 12) {
+                    Text("Drag to reorder \(isPDF ? "pages" : "images")")
+                        .font(.headline)
+                        .padding(.top)
+
+                    LazyVStack(spacing: 8) {
+                        ForEach(reorderedImages.indices, id: \.self) { index in
+                            ReorderableImageRow(
+                                image: reorderedImages[index],
+                                index: index,
+                                totalCount: reorderedImages.count,
+                                onMove: { from, to in
+                                    withAnimation {
+                                        reorderedImages.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Reorder")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        onReorder(reorderedImages)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+struct ReorderableImageRow: View {
+    let image: UIImage
+    let index: Int
+    let totalCount: Int
+    let onMove: (Int, Int) -> Void
+
+    @State private var offset = CGSize.zero
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Drag handle
+            Image(systemName: "line.3.horizontal")
+                .foregroundColor(.gray)
+                .frame(width: 20)
+
+            // Page number
+            Text("\(index + 1)")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .frame(width: 30)
+                .background(Color.gray)
+                .cornerRadius(8)
+
+            // Thumbnail
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 60, height: 85)
+                .cornerRadius(6)
+                .clipped()
+
+            Spacer()
+
+            // Move buttons
+            HStack(spacing: 8) {
+                Button(action: { onMove(index, index - 1) }) {
+                    Image(systemName: "chevron.up.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(index > 0 ? .blue : .gray)
+                }
+                .disabled(index == 0)
+
+                Button(action: { onMove(index, index + 1) }) {
+                    Image(systemName: "chevron.down.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(index < totalCount - 1 ? .blue : .gray)
+                }
+                .disabled(index >= totalCount - 1)
+            }
+        }
+        .padding(12)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(10)
     }
 }
 
