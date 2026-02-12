@@ -7,8 +7,8 @@ class SpotifyManager: ObservableObject {
 
     // IMPORTANT: Replace these with your own Spotify API credentials
     // Get them from https://developer.spotify.com/dashboard
-    private let clientId = "YOUR_CLIENT_ID"
-    private let clientSecret = "YOUR_CLIENT_SECRET"
+    private let clientId = "9c85d94e28244e0cb680a3ecda8c888f"
+    private let clientSecret = "210934ed4df34a1e8ae8985513aba973"
 
     @Published var accessToken: String?
     @Published var isAuthenticated = false
