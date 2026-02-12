@@ -843,10 +843,11 @@ struct ComicTranslationView: View {
         guard let firstPage = pages.first else { return }
 
         // Process the first page
-        await manager.processImage(firstPage)
-
-        // Prefetch next pages (up to 2)
-        prefetchNextImages()
+        Task {
+            await manager.processImage(firstPage)
+            // Prefetch next pages (up to 2)
+            prefetchNextImages()
+        }
     }
 
     private func previousPage() {
