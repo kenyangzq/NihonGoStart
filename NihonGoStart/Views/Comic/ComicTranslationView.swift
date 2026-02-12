@@ -1120,12 +1120,12 @@ struct ComicTranslationView: View {
     // MARK: - Reorder Images
 
     private func reorderImages(to newOrder: [UIImage]) {
-        guard !manager.sessionPDFPages.isEmpty else {
-            // Regular images
-            manager.sessionImages = newOrder
-        } {
+        if !manager.sessionPDFPages.isEmpty {
             // PDF pages
             manager.sessionPDFPages = newOrder
+        } else {
+            // Regular images
+            manager.sessionImages = newOrder
         }
 
         // Update current page index to stay within bounds
