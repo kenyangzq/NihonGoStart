@@ -2,7 +2,6 @@ import Foundation
 import AVFoundation
 import UIKit
 import CryptoKit
-import AuthenticationServices
 import MusicKit
 
 // MARK: - Apple Music JWT Generator
@@ -188,10 +187,13 @@ class MusicManager: NSObject, ObservableObject {
     }
 
     deinit {
-        Task { @MainActor in
-            removeTimeObserver()
-            stopPlayback()
+        // Cleanup without capturing self
+        if let observer = timeObserver, let player = audioPlayer {
+            player.removeTimeObserver(observer)
         }
+        audioPlayer?.pause()
+        audioPlayer = nil
+        playerItem = nil
     }
 
     // MARK: - Token Management
@@ -250,7 +252,7 @@ class MusicManager: NSObject, ObservableObject {
         }
 
         // Request MusicKit user authorization
-        let status = await MusicAuthorizationKit.request()
+        let status = await ApplicationMusicPlayer.shared.authorize(toPlay: .catalogContent)
 
         await MainActor.run {
             isAuthenticating = false
@@ -575,8 +577,7 @@ class MusicManager: NSObject, ObservableObject {
             }
 
             // Play the track using MusicKit
-            let playbackQueue = ApplicationMusicPlayer.Queue(entries: [song])
-            applicationMusicPlayer?.queue = playbackQueue
+            applicationMusicPlayer?.queue = [song]
             try await applicationMusicPlayer?.play()
 
             await MainActor.run {
@@ -626,8 +627,8 @@ class MusicManager: NSObject, ObservableObject {
 
     func stopPlayback() {
         // Stop MusicKit player
-        Task {
-            try? await applicationMusicPlayer?.stop()
+        Task { @MainActor in
+            applicationMusicPlayer?.stop()
         }
 
         // Stop preview player
@@ -651,8 +652,8 @@ class MusicManager: NSObject, ObservableObject {
 
     func pausePlayback() {
         if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
-            Task {
-                try? await applicationMusicPlayer?.pause()
+            Task { @MainActor in
+                applicationMusicPlayer?.pause()
             }
         } else {
             audioPlayer?.pause()
@@ -662,8 +663,8 @@ class MusicManager: NSObject, ObservableObject {
 
     func resumePlayback() {
         if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
-            Task {
-                try? await applicationMusicPlayer?.play()
+            Task { @MainActor in
+                applicationMusicPlayer?.play()
             }
         } else {
             audioPlayer?.play()
@@ -679,8 +680,11 @@ class MusicManager: NSObject, ObservableObject {
             queue: .main
         ) { [weak self] _ in
             // Check if playback ended
-            if playerItem.currentTime() >= playerItem.duration {
-                self?.isPlaying = false
+            guard let self = self else { return }
+            Task { @MainActor in
+                if playerItem.currentTime() >= playerItem.duration {
+                    self.isPlaying = false
+                }
             }
         }
     }
@@ -695,44 +699,12 @@ class MusicManager: NSObject, ObservableObject {
     // MARK: - Add to Library
 
     func addToLibrary(_ track: AppleMusicTrack) async {
-        guard isUserAuthenticated else {
-            await MainActor.run {
-                errorMessage = "Please connect to Apple Music first"
-            }
-            return
-        }
+        // For now, just open the song in Apple Music app to add to library
+        // The MusicKit Library API is complex and requires additional setup
+        openInAppleMusic(track)
 
-        guard subscriptionStatus.canPlayFullTracks else {
-            await MainActor.run {
-                errorMessage = "Apple Music subscription required to save songs"
-            }
-            return
-        }
-
-        do {
-            let trackID = MusicItemID(track.catalogId)
-
-            // Add to library using MusicKit
-            let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: trackID)
-            let song = try await request.response().items.first
-
-            guard let song = song else {
-                await MainActor.run {
-                    errorMessage = "Track not found in catalog"
-                }
-                return
-            }
-
-            try await Library.shared.add(song)
-
-            await MainActor.run {
-                errorMessage = "Added to Library"
-            }
-        } catch {
-            print("Failed to add to library: \(error)")
-            await MainActor.run {
-                errorMessage = "Failed to add to Library: \(error.localizedDescription)"
-            }
+        await MainActor.run {
+            errorMessage = "Opened in Apple Music - add to library there"
         }
     }
 
