@@ -16,12 +16,23 @@ class AppSettings: ObservableObject {
 
     @Published var showDevModeToast = false
 
+    // Computed visible tabs - this will trigger updates when isDevModeEnabled changes
+    var visibleTabs: [MainTab] {
+        if isDevModeEnabled {
+            return MainTab.allCases
+        } else {
+            return [.learn]
+        }
+    }
+
     private init() {
         isDevModeEnabled = UserDefaults.standard.bool(forKey: devModeKey)
     }
 
     func toggleDevMode() {
-        isDevModeEnabled.toggle()
+        withAnimation {
+            isDevModeEnabled.toggle()
+        }
 
         // Show toast notification
         showDevModeToast = true
@@ -35,6 +46,9 @@ class AppSettings: ObservableObject {
         let generator = UINotificationFeedbackGenerator()
         generator.prepare()
         generator.notificationOccurred(.success)
+
+        print("Dev mode toggled to: \(isDevModeEnabled)")
+        print("Visible tabs: \(visibleTabs.map { $0.title })")
     }
 }
 
@@ -45,15 +59,6 @@ enum MainTab: Int, CaseIterable, Identifiable {
     case comic
 
     var id: Int { rawValue }
-
-    // Check if this tab should be visible based on dev mode
-    var isVisible: Bool {
-        if AppSettings.shared.isDevModeEnabled {
-            return true // Show all tabs in dev mode
-        } else {
-            return self == .learn // Only show Learn tab in normal mode
-        }
-    }
 
     var title: String {
         switch self {
@@ -153,7 +158,7 @@ struct ContentView: View {
         .edgesIgnoringSafeArea(.bottom)
         .onChange(of: appSettings.isDevModeEnabled) { _, newValue in
             // Switch to Learn tab if dev mode is disabled and current tab is not visible
-            if !newValue && !selectedMainTab.isVisible {
+            if !newValue && !appSettings.visibleTabs.contains(selectedMainTab) {
                 selectedMainTab = .learn
             }
         }
@@ -219,16 +224,12 @@ struct MainTabBar: View {
     @Binding var selectedTab: MainTab
     @StateObject private var appSettings = AppSettings.shared
 
-    var visibleTabs: [MainTab] {
-        MainTab.allCases.filter { $0.isVisible }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             Divider()
 
             HStack(spacing: 0) {
-                ForEach(visibleTabs) { tab in
+                ForEach(appSettings.visibleTabs) { tab in
                     MainTabBarButton(
                         tab: tab,
                         selectedTab: $selectedTab
