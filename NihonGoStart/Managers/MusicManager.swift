@@ -219,7 +219,7 @@ class MusicManager: NSObject, ObservableObject {
     }
 
     private func configureMusicKit() async {
-        guard let token = developerToken else { return }
+        guard developerToken != nil else { return }
 
         // Configure MusicKit with developer token for catalog operations
         // Note: The API for setting developer token has changed in recent iOS versions
@@ -231,7 +231,7 @@ class MusicManager: NSObject, ObservableObject {
 
     func checkUserAuthenticationStatus() {
         // Check if we have a stored user token
-        if let userToken = keychainManager.loadUserToken() {
+        if keychainManager.loadUserToken() != nil {
             isUserAuthenticated = true
             Task {
                 await fetchSubscriptionStatus()
@@ -252,8 +252,8 @@ class MusicManager: NSObject, ObservableObject {
         }
 
         // Request MusicKit user authorization
-        // The API uses MusicAuthorizationKit in newer versions
-        let authorizationStatus = await MusicAuthorizationKit.request()
+        // Use the correct MusicKit API for authorization
+        let authorizationStatus = await MusicKitLibrary.requestAuthorization()
 
         await MainActor.run {
             isAuthenticating = false
@@ -351,7 +351,7 @@ class MusicManager: NSObject, ObservableObject {
     // MARK: - Search (Works with developer token - no user auth required)
 
     func searchJapaneseSongs(query: String) async {
-        guard hasDeveloperToken, let token = developerToken else {
+        guard hasDeveloperToken, developerToken != nil else {
             await MainActor.run {
                 self.errorMessage = "Apple Music not configured. Please add your Music Kit credentials in Secrets.swift"
             }

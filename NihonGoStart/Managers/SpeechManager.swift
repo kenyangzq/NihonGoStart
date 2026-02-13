@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 
 /// Shared speech manager to handle Japanese text-to-speech without blocking the main thread
+@MainActor
 class SpeechManager: NSObject, ObservableObject {
     static let shared = SpeechManager()
 
