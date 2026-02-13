@@ -252,12 +252,13 @@ class MusicManager: NSObject, ObservableObject {
         }
 
         // Request MusicKit user authorization
-        let status = await ApplicationMusicPlayer.shared.authorize(toPlay: .catalogContent)
+        // The API uses MusicAuthorizationKit in newer versions
+        let authorizationStatus = await MusicAuthorizationKit.request()
 
         await MainActor.run {
             isAuthenticating = false
 
-            switch status {
+            switch authorizationStatus {
             case .authorized:
                 isUserAuthenticated = true
 
@@ -652,9 +653,7 @@ class MusicManager: NSObject, ObservableObject {
 
     func pausePlayback() {
         if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
-            Task { @MainActor in
-                applicationMusicPlayer?.pause()
-            }
+            applicationMusicPlayer?.pause()
         } else {
             audioPlayer?.pause()
         }
@@ -663,13 +662,16 @@ class MusicManager: NSObject, ObservableObject {
 
     func resumePlayback() {
         if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
-            Task { @MainActor in
-                applicationMusicPlayer?.play()
+            Task {
+                try? await applicationMusicPlayer?.play()
+                await MainActor.run {
+                    self.isPlaying = true
+                }
             }
         } else {
             audioPlayer?.play()
+            isPlaying = true
         }
-        isPlaying = true
     }
 
     private func setupTimeObserver() {
