@@ -36,13 +36,13 @@ NihonGoStart/
 │   │   ├── Comic/                   # Comic translation views
 │   │   │   ├── ComicTranslationView.swift  # Manga OCR & translation UI + full screen mode
 │   │   │   └── BookmarksView.swift  # Saved translations UI
-│   │   └── Songs/                   # Music/Spotify views
-│   │       └── SongsView.swift      # Spotify integration UI
+│   │   └── Songs/                   # Music/Apple Music views
+│   │       └── SongsView.swift      # Apple Music integration UI (user auth, search, playback, lyrics)
 │   │
 │   ├── Managers/                    # Business logic & API clients
 │   │   ├── ComicTranslationManager.swift  # Azure Vision, OCR, translation logic
 │   │   ├── BookmarksManager.swift   # Bookmarks persistence
-│   │   ├── SpotifyManager.swift     # Spotify API client
+│   │   ├── MusicManager.swift       # Apple Music integration with MusicKit (user auth, playback, library)
 │   │   └── SpeechManager.swift      # Text-to-speech (Japanese)
 │   │
 │   ├── Shared/                      # Shared code between app and widget
@@ -60,6 +60,7 @@ NihonGoStart/
 │   │   └── grammar.json             # Grammar points by level/category
 │   │
 │   ├── Support/                     # Support files
+│   │   ├── KeychainManager.swift    # Secure token storage for Apple Music user authorization
 │   │   └── NihonGoStart-Bridging-Header.h
 │   │
 │   ├── Secrets.swift                # API keys (git-ignored, must be created)
@@ -119,10 +120,23 @@ enum Secrets {
 
     // Optional: manga-ocr backend URL
     static let mangaOCREndpoint = ""
+
+    // Apple Music Kit (for Japanese music integration)
+    // To enable Apple Music integration:
+    // 1. Enroll in Apple Developer Program (https://developer.apple.com/programs/)
+    // 2. Go to https://appstoreconnect.apple.com and create an app
+    // 3. Go to https://developer.apple.com/account/resources/identifiers/list
+    // 4. Create a MusicKit Key (Team ID, Key ID, and download .p8 private key)
+    // 5. Copy the private key content (excluding header/footer) and base64 encode it
+    //    Use: cat MusicKit.p8 | base64 | tr -d '\n'
+    // 6. Fill in the values below:
+    static let appleMusicTeamId = ""  // Your Apple Developer Team ID (10-character string)
+    static let appleMusicKeyId = ""   // Your MusicKit Key ID (10-character string)
+    static let appleMusicPrivateKey = "" // Base64-encoded content of your .p8 private key file
 }
 ```
 
-For Spotify integration, update credentials directly in `SpotifyManager.swift`.
+For Apple Music integration, credentials are stored in `Secrets.swift`.
 
 ## Architecture Patterns
 
@@ -130,7 +144,8 @@ For Spotify integration, update credentials directly in `SpotifyManager.swift`.
 The app uses shared singleton managers for state management:
 - `ComicTranslationManager.shared` - Comic translation state & API calls
 - `BookmarksManager.shared` - Bookmarked translations persistence
-- `SpotifyManager.shared` - Spotify authentication & playback
+- `MusicManager.shared` - Apple Music integration with MusicKit (search, playback, library, user authorization)
+- `KeychainManager.shared` - Secure token storage for Apple Music user tokens
 - `SpeechManager.shared` - Text-to-speech
 - `WidgetDataProvider.shared` - Widget flashcard data sync via App Groups
 
@@ -199,10 +214,50 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 - App syncs data on launch via `NihonGoStartApp.onAppear`
 - **Bug fix:** Reveal/Hide button now only toggles meaning visibility without advancing to next card (fixed by avoiding `selectedCardType` setter in `updateCardTypeIfNeeded`)
 
+### Apple Music Integration with MusicKit
+The Songs feature integrates with Apple Music using the native MusicKit framework:
+
+#### User Authorization Flow
+- **Developer Token (JWT)**: Generated from MusicKit credentials for catalog operations
+  - Used for: Searching Apple Music catalog, fetching song metadata, lyrics
+  - Works without user login for catalog search
+- **User Token**: Requested via MusicKit when user taps "Connect to Apple Music"
+  - Stored securely in Keychain (via `KeychainManager`)
+  - Used for: Full track playback, library access, saving songs
+  - Authorization status tracked: `.authorized`, `.denied`, `.notDetermined`, `.restricted`
+
+#### Subscription Status
+- **Subscribed**: User has Apple Music subscription → full track playback, library access
+- **Not Subscribed**: User has Apple ID but no subscription → preview playback only
+- **No Apple Music**: User not logged in → catalog search with preview playback
+- Fallback to preview playback if user lacks subscription
+
+#### MusicKit Features
+- **Search**: `MusicCatalogSearchRequest` for searching songs by artist/title
+- **Playback**: `ApplicationMusicPlayer` for full track playback (subscribers only)
+- **Library**: `MCNLibrary.shared.add()` to save songs to user's library
+- **Subscription Status**: `MusicCatalogSubscriptionRequest` to check user's subscription
+- **Lyrics**: API fetch via REST endpoint with TTML parsing
+
+#### Key Implementation Details
+- `MusicManager` is `@MainActor` for UI thread safety
+- User token stored in Keychain (not UserDefaults) for security
+- Developer token valid for 6 months (auto-generated on app launch)
+- Catalog search works for all users (no subscription required)
+- Full playback and library features require Apple Music subscription
+- Preview playback (30-second clips) available for all tracks
+
+#### Security
+- User tokens stored securely in Keychain via `KeychainManager`
+- Service name: `com.ziqiyang.NihonGoStart.keychain`
+- Tokens persist across app launches until user logs out
+- Logout removes token from Keychain and resets authentication state
+
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
 - Translation cache persisted across app restarts
 - Cache includes `hasNoText` flag to skip re-processing images without Japanese text
+- Apple Music user token stored in Keychain (not UserDefaults)
 - Bookmarks stored in UserDefaults
 - Widget card data stored in App Group UserDefaults
 
@@ -228,7 +283,7 @@ xcodebuild test -scheme NihonGoStart -destination 'platform=iOS Simulator,name=i
 - **Azure OpenAI** - Best translation quality
 - **Google Gemini** - Translation fallback
 - **Azure Translator** - Translation fallback
-- **Spotify Web API** - Music search & playback
+- **Apple MusicKit** - Music search, playback, and library (requires Apple Developer account)
 - **Jisho API** - Dictionary lookups
 
 ### Python Backend (Optional)
@@ -305,6 +360,37 @@ Key functions in `Managers/ComicTranslationManager.swift`:
 - Data provider (shared): `NihonGoStart/Shared/WidgetDataProvider.swift`
 - To add new card types: update `WidgetCardType` enum and add generator in `WidgetDataProvider`
 - To add new interactive buttons: create a new `AppIntent` struct in `AppIntent.swift` and add a `Button(intent:)` in the widget view
+
+### Setting Up Apple Music Integration
+1. **Enroll in Apple Developer Program**: https://developer.apple.com/programs/
+2. **Create an App in App Store Connect**: https://appstoreconnect.apple.com
+3. **Create MusicKit Key**:
+   - Go to https://developer.apple.com/account/resources/identifiers/list
+   - Create a MusicKit Key (Team ID, Key ID, and download .p8 private key)
+   - **Important**: Save the .p8 file - you can only download it once!
+4. **Encode Private Key**:
+   ```bash
+   cat MusicKit.p8 | base64 | tr -d '\n'
+   ```
+5. **Add Credentials to Secrets.swift**:
+   ```swift
+   static let appleMusicTeamId = "YOUR_TEAM_ID"  // 10-character string
+   static let appleMusicKeyId = "YOUR_KEY_ID"   // 10-character string
+   static let appleMusicPrivateKey = "BASE64_ENCODED_PRIVATE_KEY"
+   ```
+6. **Enable MusicKit Capability in Xcode**:
+   - Select your app target
+   - Signing & Capabilities → + Capability → MusicKit
+7. **Add KeychainManager.swift to Xcode Project**:
+   - File already created at `NihonGoStart/Support/KeychainManager.swift`
+   - Ensure it's added to the main app target
+
+#### Testing Apple Music Integration
+- **Without credentials**: Catalog search and preview playback work
+- **With credentials only**: Full catalog search, preview playback
+- **With user authorization**: Full track playback (if subscribed), library access
+- Test with free Apple ID: Preview playback, catalog search
+- Test with subscription: Full playback, save to library
 
 ### Widget Setup (Xcode)
 The widget extension target must be added in Xcode:

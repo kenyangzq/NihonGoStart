@@ -8,10 +8,33 @@ struct SongsView: View {
     @State private var selectedTrack: AppleMusicTrack?
     @State private var showLyricsView = false
     @State private var showStorefrontPicker = false
+    @State private var showAuthAlert = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // User Status Bar
+                UserStatusBar(
+                    isUserAuthenticated: musicManager.isUserAuthenticated,
+                    subscriptionStatus: musicManager.subscriptionStatus,
+                    isAuthenticating: musicManager.isAuthenticating,
+                    onConnect: {
+                        Task {
+                            do {
+                                try await musicManager.requestUserAuthorization()
+                            } catch {
+                                showAuthAlert = true
+                            }
+                        }
+                    },
+                    onLogout: {
+                        musicManager.logoutUser()
+                    }
+                )
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(UIColor.secondarySystemBackground))
+
                 // Storefront Selector
                 StorefrontPickerBar(
                     selectedStorefront: $musicManager.preferredStorefront,
@@ -73,7 +96,7 @@ struct SongsView: View {
                     }
                     .padding()
                     .frame(maxHeight: .infinity)
-                } else if !musicManager.isAuthenticated {
+                } else if !musicManager.hasDeveloperToken {
                     // Not authenticated
                     VStack(spacing: 20) {
                         Image(systemName: "music.note")
@@ -144,8 +167,15 @@ struct SongsView: View {
                         SongRowView(
                             track: track,
                             isPlaying: musicManager.currentTrack?.id == track.id && musicManager.isPlaying,
+                            isUserAuthenticated: musicManager.isUserAuthenticated,
+                            isSubscribed: musicManager.subscriptionStatus.canPlayFullTracks,
                             onPlay: {
                                 musicManager.togglePlayback(track)
+                            },
+                            onAddToLibrary: {
+                                Task {
+                                    await musicManager.addToLibrary(track)
+                                }
                             },
                             onLyrics: {
                                 selectedTrack = track
@@ -193,6 +223,70 @@ struct SongsView: View {
                 if let track = selectedTrack {
                     LyricsView(track: track)
                 }
+            }
+            .alert("Authorization Required", isPresented: $showAuthAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(musicManager.errorMessage ?? "Failed to authorize with Apple Music")
+            }
+        }
+    }
+}
+
+// MARK: - User Status Bar
+
+struct UserStatusBar: View {
+    let isUserAuthenticated: Bool
+    let subscriptionStatus: MusicManager.MusicSubscriptionStatus
+    let isAuthenticating: Bool
+    let onConnect: () -> Void
+    let onLogout: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Status Icon
+            Image(systemName: isUserAuthenticated ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(isUserAuthenticated ? .green : .gray)
+                .font(.caption)
+
+            // Status Text
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isUserAuthenticated ? "Connected to Apple Music" : "Catalog Access Only")
+                    .font(.caption)
+                    .fontWeight(.medium)
+
+                if isUserAuthenticated {
+                    Text(subscriptionStatus.displayName)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Sign in for full playback and library access")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if isAuthenticating {
+                ProgressView()
+                    .scaleEffect(0.7)
+            } else if isUserAuthenticated {
+                Button("Logout") {
+                    onLogout()
+                }
+                .font(.caption)
+                .foregroundColor(.red)
+            } else {
+                Button("Connect") {
+                    onConnect()
+                }
+                .font(.caption)
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(12)
             }
         }
     }
@@ -281,7 +375,10 @@ struct SearchBar: View {
 struct SongRowView: View {
     let track: AppleMusicTrack
     let isPlaying: Bool
+    let isUserAuthenticated: Bool
+    let isSubscribed: Bool
     let onPlay: () -> Void
+    let onAddToLibrary: () -> Void
     let onLyrics: () -> Void
     let onOpenInMusic: () -> Void
 
@@ -326,6 +423,15 @@ struct SongRowView: View {
 
             // Action Buttons
             HStack(spacing: 8) {
+                // Add to Library button (only for authenticated users)
+                if isUserAuthenticated && isSubscribed {
+                    Button(action: onAddToLibrary) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 20))
+                            .foregroundColor(.blue)
+                    }
+                }
+
                 // Play/Preview Button
                 Button(action: onPlay) {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")

@@ -3,6 +3,7 @@ import AVFoundation
 import UIKit
 import CryptoKit
 import AuthenticationServices
+import MusicKit
 
 // MARK: - Apple Music JWT Generator
 
@@ -85,7 +86,8 @@ class MusicJWTGenerator {
 
 // MARK: - Music Manager
 
-class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
+@MainActor
+class MusicManager: NSObject, ObservableObject {
     static let shared = MusicManager()
 
     // MARK: - Configuration
@@ -99,19 +101,28 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
     private let japanStorefront = "jp"
     private let usStorefront = "us"
 
-    // Music Catalog Search API
+    // Music Catalog Search API - Developer token for catalog operations
     private var developerToken: String?
+
+    // MARK: - MusicKit
+
+    private var musicPlayer: MusicPlayer?
+    @Published var applicationMusicPlayer: ApplicationMusicPlayer?
+    private let keychainManager = KeychainManager.shared
 
     // MARK: - Published Properties
 
     @Published var isConfigured = false
-    @Published var isAuthenticated = false
+    @Published var isUserAuthenticated = false // User has authorized with their Apple ID
+    @Published var hasDeveloperToken = false // Developer token is configured
     @Published var isAuthenticating = false
     @Published var searchResults: [AppleMusicTrack] = []
     @Published var isSearching = false
     @Published var errorMessage: String?
+    @Published var subscriptionStatus: MusicSubscriptionStatus = .unknown
+    @Published var countryCode: String?
 
-    // Playback
+    // Legacy playback (for preview only)
     private var audioPlayer: AVPlayer?
     private var playerItem: AVPlayerItem?
     @Published var isPlaying = false
@@ -122,6 +133,31 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
     @Published var preferredStorefront: String = "jp" // Default to Japan store
 
     private var timeObserver: Any?
+
+    // MARK: - Music Subscription Status
+
+    enum MusicSubscriptionStatus {
+        case unknown
+        case subscribed
+        case notSubscribed
+        case noAppleMusic
+
+        var displayName: String {
+            switch self {
+            case .unknown: return "Unknown"
+            case .subscribed: return "Apple Music Subscriber"
+            case .notSubscribed: return "Free Account"
+            case .noAppleMusic: return "No Apple Music"
+            }
+        }
+
+        var canPlayFullTracks: Bool {
+            switch self {
+            case .subscribed: return true
+            case .unknown, .notSubscribed, .noAppleMusic: return false
+            }
+        }
+    }
 
     // MARK: - Initialization
 
@@ -149,6 +185,7 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
 
         setupAudioSession()
         loadUserPreferences()
+        checkUserAuthenticationStatus()
     }
 
     deinit {
@@ -170,7 +207,149 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
         developerToken = generator.generateDeveloperToken()
 
         if developerToken != nil {
-            isAuthenticated = true
+            hasDeveloperToken = true
+            // Configure MusicKit with developer token
+            Task {
+                await configureMusicKit()
+            }
+        }
+    }
+
+    private func configureMusicKit() async {
+        guard let token = developerToken else { return }
+
+        do {
+            // Configure MusicKit with developer token for catalog operations
+            try await MusicDataProperties.current.developerToken = token
+            print("MusicKit configured successfully")
+        } catch {
+            print("Failed to configure MusicKit: \(error)")
+        }
+    }
+
+    // MARK: - User Authentication
+
+    func checkUserAuthenticationStatus() {
+        // Check if we have a stored user token
+        if let userToken = keychainManager.loadUserToken() {
+            isUserAuthenticated = true
+            Task {
+                await fetchSubscriptionStatus()
+            }
+        } else {
+            isUserAuthenticated = false
+            subscriptionStatus = .noAppleMusic
+        }
+    }
+
+    func requestUserAuthorization() async throws {
+        guard hasDeveloperToken else {
+            throw MusicAuthError.notConfigured
+        }
+
+        await MainActor.run {
+            isAuthenticating = true
+        }
+
+        do {
+            // Request MusicKit user authorization with required scopes
+            // Note: MusicKit's native requestAuthorization doesn't allow custom scope specification
+            // The scopes are determined by the MusicKit capability and user's consent
+            let status = await MusicAuthorizationKit.Request.userAuthorization.access capabilities: []
+
+            await MainActor.run {
+                isAuthenticating = false
+
+                switch status {
+                case .authorized:
+                    isUserAuthenticated = true
+
+                    // Get and store user token
+                    Task {
+                        await storeUserToken()
+                        await fetchSubscriptionStatus()
+                    }
+
+                case .denied:
+                    isUserAuthenticated = false
+                    errorMessage = "Apple Music access was denied. Please enable in Settings."
+
+                case .notDetermined:
+                    isUserAuthenticated = false
+                    errorMessage = "Authorization could not be determined."
+
+                case .restricted:
+                    isUserAuthenticated = false
+                    errorMessage = "Apple Music is restricted on this device."
+
+                @unknown default:
+                    isUserAuthenticated = false
+                    errorMessage = "Unknown authorization status."
+                }
+            }
+        } catch {
+            await MainActor.run {
+                isAuthenticating = false
+                isUserAuthenticated = false
+                errorMessage = "Authorization failed: \(error.localizedDescription)"
+                throw error
+            }
+        }
+    }
+
+    private func storeUserToken() async {
+        do {
+            // Get the current MusicUserToken
+            let userToken = try await MusicUserToken.developerToken
+
+            // Store it in keychain
+            _ = keychainManager.saveUserToken(userToken)
+            print("User token stored successfully")
+        } catch {
+            print("Failed to store user token: \(error)")
+        }
+    }
+
+    func logoutUser() {
+        // Remove user token from keychain
+        _ = keychainManager.deleteUserToken()
+
+        // Reset state
+        isUserAuthenticated = false
+        subscriptionStatus = .noAppleMusic
+        countryCode = nil
+
+        // Stop any playback
+        stopPlayback()
+
+        print("User logged out successfully")
+    }
+
+    private func fetchSubscriptionStatus() async {
+        guard isUserAuthenticated else {
+            subscriptionStatus = .noAppleMusic
+            return
+        }
+
+        do {
+            // Fetch catalog subscription status
+            let catalogSubscription = try await MusicCatalogSubscriptionRequest().response()
+
+            await MainActor.run {
+                self.countryCode = catalogSubscription.storefrontID
+
+                if catalogSubscription.canPlayCatalogContent {
+                    subscriptionStatus = .subscribed
+                } else {
+                    subscriptionStatus = .notSubscribed
+                }
+            }
+        } catch {
+            print("Failed to fetch subscription status: \(error)")
+            await MainActor.run {
+                // If we can't fetch, assume not subscribed but allow catalog search
+                subscriptionStatus = .notSubscribed
+            }
         }
     }
 
@@ -199,10 +378,10 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
         UserDefaults.standard.set(storefront, forKey: "appleMusicStorefront")
     }
 
-    // MARK: - Search
+    // MARK: - Search (Works with developer token - no user auth required)
 
     func searchJapaneseSongs(query: String) async {
-        guard isAuthenticated, let token = developerToken else {
+        guard hasDeveloperToken, let token = developerToken else {
             await MainActor.run {
                 self.errorMessage = "Apple Music not configured. Please add your Music Kit credentials in Secrets.swift"
             }
@@ -215,6 +394,64 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
             self.errorMessage = nil
         }
 
+        // Try MusicKit catalog search first (requires developer token)
+        if isUserAuthenticated {
+            await searchWithMusicKit(query: query)
+        } else {
+            // Fall back to REST API search
+            await searchWithRestAPI(query: query)
+        }
+    }
+
+    private func searchWithMusicKit(query: String) async {
+        do {
+            // Use MusicKit's catalog search
+            var request = MusicCatalogSearchRequest(term: query, types: [Song.self])
+            request.limit = 20
+
+            let searchResult = try await request.response()
+
+            var tracks: [AppleMusicTrack] = []
+
+            for song in searchResult.songs {
+                // Get artwork URL
+                var artworkURL: String?
+                if let artwork = song.artwork {
+                    artworkURL = artwork.url(width: 300, height: 300).absoluteString
+                }
+
+                let track = AppleMusicTrack(
+                    id: song.id.rawValue,
+                    catalogId: song.id.rawValue,
+                    name: song.title,
+                    artist: song.artistName,
+                    albumName: song.albumTitle,
+                    artworkURL: artworkURL,
+                    duration: song.duration,
+                    previewURL: song.previewURL?.absoluteString,
+                    appleMusicURL: song.url.absoluteString,
+                    storefront: preferredStorefront
+                )
+
+                tracks.append(track)
+            }
+
+            await MainActor.run {
+                self.searchResults = tracks
+                self.isSearching = false
+
+                if tracks.isEmpty {
+                    self.errorMessage = "No songs found. Try searching for Japanese artists."
+                }
+            }
+        } catch {
+            print("MusicKit search failed: \(error)")
+            // Fall back to REST API
+            await searchWithRestAPI(query: query)
+        }
+    }
+
+    private func searchWithRestAPI(query: String) async {
         // Search in both Japanese and US stores for better coverage
         let storefronts = [preferredStorefront, usStorefront]
 
@@ -228,7 +465,7 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
             guard let url = URL(string: urlString) else { continue }
 
             var request = URLRequest(url: url)
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(developerToken ?? "")", forHTTPHeaderField: "Authorization")
             request.timeoutInterval = 15
 
             do {
@@ -332,10 +569,69 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
     // MARK: - Playback
 
     func playTrack(_ track: AppleMusicTrack) {
+        // If user is subscribed and authenticated, use MusicKit for full playback
+        if isUserAuthenticated && subscriptionStatus.canPlayFullTracks {
+            Task {
+                await playFullTrackWithMusicKit(track)
+            }
+        } else {
+            // Otherwise, use preview playback
+            playPreview(track)
+        }
+    }
+
+    private func playFullTrackWithMusicKit(_ track: AppleMusicTrack) async {
+        guard isUserAuthenticated else {
+            await MainActor.run {
+                errorMessage = "Please connect to Apple Music first"
+            }
+            return
+        }
+
+        do {
+            // Create MusicKit track from catalog ID
+            let trackID = MusicItemID(track.catalogId)
+            let song = try await MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: trackID).response().items.first
+
+            guard let song = song else {
+                await MainActor.run {
+                    errorMessage = "Track not found in catalog"
+                    playPreview(track)
+                }
+                return
+            }
+
+            // Initialize application music player if needed
+            if applicationMusicPlayer == nil {
+                applicationMusicPlayer = ApplicationMusicPlayer.shared
+            }
+
+            // Play the track using MusicKit
+            let playbackQueue = ApplicationMusicPlayer.Queue(items: [song])
+            applicationMusicPlayer?.queue = playbackQueue
+            try await applicationMusicPlayer?.play()
+
+            await MainActor.run {
+                currentTrack = track
+                isPlaying = true
+                errorMessage = nil
+            }
+
+            // Fetch lyrics
+            await fetchLyrics(for: track)
+        } catch {
+            print("MusicKit playback failed: \(error)")
+            await MainActor.run {
+                // Fall back to preview
+                errorMessage = "Full playback unavailable. Playing preview."
+                playPreview(track)
+            }
+        }
+    }
+
+    private func playPreview(_ track: AppleMusicTrack) {
         stopPlayback()
 
-        // For now, use preview URL. Full playback requires MusicKit subscription
-        // In a future update, we can integrate full MusicKit for subscription users
         guard let previewURLString = track.previewURL,
               let url = URL(string: previewURLString) else {
             errorMessage = "Preview not available. Open in Apple Music to listen."
@@ -349,6 +645,7 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
 
         currentTrack = track
         isPlaying = true
+        errorMessage = nil
 
         // Setup time observer for end of playback
         setupTimeObserver()
@@ -359,53 +656,13 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
         }
     }
 
-    func playFullTrack(_ track: AppleMusicTrack) async {
-        stopPlayback()
-
-        guard isAuthenticated,
-              let token = developerToken else {
-            errorMessage = "Apple Music not configured"
-            return
-        }
-
-        // Get the storefront-specific catalog URL for full playback
-        let urlString = "\(apiBaseURL)/catalog/\(track.storefront)/songs/\(track.catalogId)"
-
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            if let httpResponse = response as? HTTPURLResponse,
-               httpResponse.statusCode == 200,
-               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let attributes = json["attributes"] as? [String: Any],
-               attributes["playParams"] != nil {
-
-                // Try to construct a play URL
-                // Note: Full track playback requires Apple Music subscription and MusicKit framework
-                // For now, we'll fall back to preview
-                errorMessage = "Full playback requires Apple Music subscription. Playing preview instead."
-
-                await MainActor.run {
-                    playTrack(track)
-                }
-            } else {
-                await MainActor.run {
-                    playTrack(track)
-                }
-            }
-        } catch {
-            await MainActor.run {
-                playTrack(track)
-            }
-        }
-    }
-
     func stopPlayback() {
+        // Stop MusicKit player
+        Task {
+            try? await applicationMusicPlayer?.stop()
+        }
+
+        // Stop preview player
         audioPlayer?.pause()
         audioPlayer = nil
         playerItem = nil
@@ -425,12 +682,24 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
     }
 
     func pausePlayback() {
-        audioPlayer?.pause()
+        if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
+            Task {
+                try? await applicationMusicPlayer?.pause()
+            }
+        } else {
+            audioPlayer?.pause()
+        }
         isPlaying = false
     }
 
     func resumePlayback() {
-        audioPlayer?.play()
+        if subscriptionStatus.canPlayFullTracks && isUserAuthenticated {
+            Task {
+                try? await applicationMusicPlayer?.play()
+            }
+        } else {
+            audioPlayer?.play()
+        }
         isPlaying = true
     }
 
@@ -455,11 +724,54 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
         }
     }
 
+    // MARK: - Add to Library
+
+    func addToLibrary(_ track: AppleMusicTrack) async {
+        guard isUserAuthenticated else {
+            await MainActor.run {
+                errorMessage = "Please connect to Apple Music first"
+            }
+            return
+        }
+
+        guard subscriptionStatus.canPlayFullTracks else {
+            await MainActor.run {
+                errorMessage = "Apple Music subscription required to save songs"
+            }
+            return
+        }
+
+        do {
+            let trackID = MusicItemID(track.catalogId)
+
+            // Add to library using MusicKit
+            let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: trackID)
+            let song = try await request.response().items.first
+
+            guard let song = song else {
+                await MainActor.run {
+                    errorMessage = "Track not found in catalog"
+                }
+                return
+            }
+
+            try await MCNLibrary.shared.add(song)
+
+            await MainActor.run {
+                errorMessage = "Added to Library"
+            }
+        } catch {
+            print("Failed to add to library: \(error)")
+            await MainActor.run {
+                errorMessage = "Failed to add to Library: \(error.localizedDescription)"
+            }
+        }
+    }
+
     // MARK: - Lyrics
 
     func fetchLyrics(for track: AppleMusicTrack) async {
-        guard isAuthenticated,
-              let token = developerToken else {
+        guard hasDeveloperToken, let token = developerToken else {
             return
         }
 
@@ -584,10 +896,23 @@ class MusicManager: NSObject, ObservableObject, ASWebAuthenticationPresentationC
             }
         }
     }
+}
 
-    // MARK: - ASWebAuthenticationPresentationContextProviding
+// MARK: - Music Auth Error
 
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        return ASPresentationAnchor()
+enum MusicAuthError: LocalizedError {
+    case notConfigured
+    case authorizationFailed
+    case tokenExpired
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured:
+            return "Apple Music not configured. Please add your Music Kit credentials."
+        case .authorizationFailed:
+            return "Apple Music authorization failed."
+        case .tokenExpired:
+            return "Music token has expired. Please try again."
+        }
     }
 }
