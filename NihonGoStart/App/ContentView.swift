@@ -1,6 +1,43 @@
 import SwiftUI
 import UIKit
 
+// MARK: - App Settings (Dev Mode)
+
+class AppSettings: ObservableObject {
+    static let shared = AppSettings()
+
+    private let devModeKey = "devModeEnabled"
+
+    @Published var isDevModeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isDevModeEnabled, forKey: devModeKey)
+        }
+    }
+
+    @Published var showDevModeToast = false
+
+    private init() {
+        isDevModeEnabled = UserDefaults.standard.bool(forKey: devModeKey)
+    }
+
+    func toggleDevMode() {
+        isDevModeEnabled.toggle()
+
+        // Show toast notification
+        showDevModeToast = true
+
+        // Hide toast after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            self.showDevModeToast = false
+        }
+
+        // Haptic feedback
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(.success)
+    }
+}
+
 // Main tabs: Learn, Songs, Comic
 enum MainTab: Int, CaseIterable, Identifiable {
     case learn = 0
@@ -8,6 +45,15 @@ enum MainTab: Int, CaseIterable, Identifiable {
     case comic
 
     var id: Int { rawValue }
+
+    // Check if this tab should be visible based on dev mode
+    var isVisible: Bool {
+        if AppSettings.shared.isDevModeEnabled {
+            return true // Show all tabs in dev mode
+        } else {
+            return self == .learn // Only show Learn tab in normal mode
+        }
+    }
 
     var title: String {
         switch self {
@@ -63,6 +109,7 @@ enum LearnSubTab: Int, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var selectedMainTab: MainTab = .learn
     @State private var selectedLearnSubTab: LearnSubTab = .kana
+    @StateObject private var appSettings = AppSettings.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,6 +151,12 @@ struct ContentView: View {
             MainTabBar(selectedTab: $selectedMainTab)
         }
         .edgesIgnoringSafeArea(.bottom)
+        .onChange(of: appSettings.isDevModeEnabled) { _, newValue in
+            // Switch to Learn tab if dev mode is disabled and current tab is not visible
+            if !newValue && !selectedMainTab.isVisible {
+                selectedMainTab = .learn
+            }
+        }
     }
 }
 
@@ -164,13 +217,18 @@ struct LearnSubTabButton: View {
 
 struct MainTabBar: View {
     @Binding var selectedTab: MainTab
+    @StateObject private var appSettings = AppSettings.shared
+
+    var visibleTabs: [MainTab] {
+        MainTab.allCases.filter { $0.isVisible }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
 
             HStack(spacing: 0) {
-                ForEach(MainTab.allCases) { tab in
+                ForEach(visibleTabs) { tab in
                     MainTabBarButton(
                         tab: tab,
                         selectedTab: $selectedTab
@@ -182,6 +240,28 @@ struct MainTabBar: View {
             .padding(.bottom, getSafeAreaBottom())
             .background(Color(UIColor.secondarySystemBackground))
         }
+        .overlay(
+            // Dev mode toast notification
+            VStack {
+                if appSettings.showDevModeToast {
+                    HStack {
+                        Image(systemName: appSettings.isDevModeEnabled ? "hammer.fill" : "eye.slash.fill")
+                            .foregroundColor(.white)
+                        Text(appSettings.isDevModeEnabled ? "Dev Mode Enabled" : "Normal Mode")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(20)
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                Spacer()
+            }
+            .animation(.spring(response: 0.3), value: appSettings.showDevModeToast)
+        )
     }
 
     func getSafeAreaBottom() -> CGFloat {
@@ -200,6 +280,8 @@ struct MainTabBarButton: View {
         selectedTab == tab
     }
 
+    @State private var longPressActive = false
+
     var body: some View {
         Button(action: {
             selectedTab = tab
@@ -211,6 +293,7 @@ struct MainTabBarButton: View {
                         .frame(width: 36, height: 36)
                     Image(systemName: tab.icon)
                         .font(.system(size: 20))
+                        .symbolEffect(.bounce, value: longPressActive && tab == .learn)
                 }
                 .frame(height: 28)
 
@@ -223,5 +306,20 @@ struct MainTabBarButton: View {
             .frame(height: 49)
         }
         .buttonStyle(PlainButtonStyle())
+        // Hidden: Long press on Learn tab toggles dev mode
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 2)
+                .onChanged { _ in
+                    if tab == .learn && !longPressActive {
+                        longPressActive = true
+                    }
+                }
+                .onEnded { _ in
+                    if tab == .learn && longPressActive {
+                        longPressActive = false
+                        AppSettings.shared.toggleDevMode()
+                    }
+                }
+        )
     }
 }
