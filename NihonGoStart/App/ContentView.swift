@@ -11,28 +11,30 @@ class AppSettings: ObservableObject {
     @Published var isDevModeEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isDevModeEnabled, forKey: devModeKey)
+            // Update visible tabs when dev mode changes
+            updateVisibleTabs()
         }
     }
 
     @Published var showDevModeToast = false
-
-    // Computed visible tabs - this will trigger updates when isDevModeEnabled changes
-    var visibleTabs: [MainTab] {
-        if isDevModeEnabled {
-            return MainTab.allCases
-        } else {
-            return [.learn]
-        }
-    }
+    @Published var visibleTabs: [MainTab] = [.learn]
 
     private init() {
         isDevModeEnabled = UserDefaults.standard.bool(forKey: devModeKey)
+        updateVisibleTabs()
+    }
+
+    private func updateVisibleTabs() {
+        if isDevModeEnabled {
+            visibleTabs = MainTab.allCases
+        } else {
+            visibleTabs = [.learn]
+        }
+        print("Dev mode: \(isDevModeEnabled), Visible tabs: \(visibleTabs.map { $0.title })")
     }
 
     func toggleDevMode() {
-        withAnimation {
-            isDevModeEnabled.toggle()
-        }
+        isDevModeEnabled.toggle()
 
         // Show toast notification
         showDevModeToast = true
@@ -46,9 +48,6 @@ class AppSettings: ObservableObject {
         let generator = UINotificationFeedbackGenerator()
         generator.prepare()
         generator.notificationOccurred(.success)
-
-        print("Dev mode toggled to: \(isDevModeEnabled)")
-        print("Visible tabs: \(visibleTabs.map { $0.title })")
     }
 }
 
@@ -283,31 +282,19 @@ struct MainTabBarButton: View {
         selectedTab == tab
     }
 
-    @State private var pressTimer: Timer?
-    @State private var pressProgress: Double = 0
-    private let longPressDuration: Double = 1.5
+    @State private var isPressing = false
+    @StateObject private var appSettings = AppSettings.shared
 
     var body: some View {
         ZStack {
             // Progress indicator for long press (only on Learn tab)
-            if tab == .learn && pressProgress > 0 {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.clear)
-
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.red.opacity(0.2))
-                            .frame(width: geometry.size.width * pressProgress)
-                    }
-                }
-                .frame(height: 49)
-                .clipped()
+            if tab == .learn && isPressing {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.red.opacity(0.2))
+                    .frame(height: 49)
             }
 
             Button(action: {
-                // Cancel long press if active, otherwise select tab
-                cancelLongPress()
                 selectedTab = tab
             }) {
                 VStack(spacing: 4) {
@@ -317,7 +304,7 @@ struct MainTabBarButton: View {
                             .frame(width: 36, height: 36)
                         Image(systemName: tab.icon)
                             .font(.system(size: 20))
-                            .scaleEffect(tab == .learn && pressProgress > 0 ? 1.15 : 1.0)
+                            .scaleEffect(isPressing && tab == .learn ? 1.15 : 1.0)
                     }
                     .frame(height: 28)
 
@@ -332,52 +319,20 @@ struct MainTabBarButton: View {
                 .frame(height: 49)
             }
             .buttonStyle(PlainButtonStyle())
-            .onLongPressGesture(minimumDuration: longPressDuration, maximumDistance: 50, pressing: { pressing in
+            .onLongPressGesture(minimumDuration: 1.5, pressing: { pressing in
                 if tab == .learn {
-                    handlePressChange(pressing)
+                    withAnimation(.linear(duration: 0.1)) {
+                        isPressing = pressing
+                    }
                 }
             }, perform: {
                 if tab == .learn {
-                    triggerDevModeToggle()
+                    isPressing = false
+                    appSettings.toggleDevMode()
                 }
             })
         }
-        .onDisappear {
-            cancelLongPress()
-        }
-    }
-
-    private func handlePressChange(_ pressing: Bool) {
-        if pressing {
-            startPressTimer()
-        } else {
-            if pressProgress < 1.0 {
-                cancelLongPress()
-            }
-        }
-    }
-
-    private func startPressTimer() {
-        pressTimer?.invalidate()
-
-        let startTime = Date()
-        pressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-            let elapsed = Date().timeIntervalSince(startTime)
-            self.pressProgress = min(elapsed / longPressDuration, 1.0)
-        }
-    }
-
-    private func cancelLongPress() {
-        pressTimer?.invalidate()
-        pressTimer = nil
-        withAnimation {
-            pressProgress = 0
-        }
-    }
-
-    private func triggerDevModeToggle() {
-        cancelLongPress()
-        AppSettings.shared.toggleDevMode()
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPressing)
     }
 }
 
