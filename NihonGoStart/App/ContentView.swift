@@ -113,7 +113,7 @@ enum LearnSubTab: Int, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var selectedMainTab: MainTab = .learn
     @State private var selectedLearnSubTab: LearnSubTab = .kana
-    @StateObject private var appSettings = AppSettings.shared
+    @ObservedObject private var appSettings = AppSettings.shared
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -239,7 +239,7 @@ struct LearnSubTabButton: View {
 
 struct MainTabBar: View {
     @Binding var selectedTab: MainTab
-    @StateObject private var appSettings = AppSettings.shared
+    @ObservedObject private var appSettings = AppSettings.shared
 
     var isSingleTabMode: Bool {
         appSettings.visibleTabs.count == 1
@@ -263,6 +263,8 @@ struct MainTabBar: View {
             .padding(.bottom, getSafeAreaBottom())
             .background(Color(UIColor.secondarySystemBackground))
         }
+        .id(appSettings.visibleTabs.count) // Force view refresh when tabs change
+        .animation(.easeInOut(duration: 0.3), value: appSettings.visibleTabs.count)
     }
 
     func getSafeAreaBottom() -> CGFloat {
@@ -283,7 +285,6 @@ struct MainTabBarButton: View {
     }
 
     @State private var isPressing = false
-    @StateObject private var appSettings = AppSettings.shared
 
     var body: some View {
         ZStack {
@@ -292,6 +293,7 @@ struct MainTabBarButton: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.red.opacity(0.2))
                     .frame(height: 49)
+                    .transition(.opacity)
             }
 
             Button(action: {
@@ -305,6 +307,7 @@ struct MainTabBarButton: View {
                         Image(systemName: tab.icon)
                             .font(.system(size: 20))
                             .scaleEffect(isPressing && tab == .learn ? 1.15 : 1.0)
+                            .animation(.spring(response: 0.3), value: isPressing)
                     }
                     .frame(height: 28)
 
@@ -319,20 +322,23 @@ struct MainTabBarButton: View {
                 .frame(height: 49)
             }
             .buttonStyle(PlainButtonStyle())
-            .onLongPressGesture(minimumDuration: 1.5, pressing: { pressing in
-                if tab == .learn {
-                    withAnimation(.linear(duration: 0.1)) {
-                        isPressing = pressing
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 1.0)
+                    .onChanged { _ in
+                        if tab == .learn && !isPressing {
+                            withAnimation(.easeInOut(duration: 0.1)) {
+                                isPressing = true
+                            }
+                        }
                     }
-                }
-            }, perform: {
-                if tab == .learn {
-                    isPressing = false
-                    appSettings.toggleDevMode()
-                }
-            })
+                    .onEnded { _ in
+                        if tab == .learn && isPressing {
+                            isPressing = false
+                            AppSettings.shared.toggleDevMode()
+                        }
+                    }
+            )
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPressing)
     }
 }
 
