@@ -7,7 +7,7 @@ NihonGoStart is an iOS Japanese language learning app built with SwiftUI. It pro
 ## Tech Stack
 
 - **Platform:** iOS 17.4+
-- **Language:** Swift 5
+- **Language:** Swift 5 (Swift 6 concurrency compliant)
 - **UI Framework:** SwiftUI
 - **Build System:** Xcode 15+
 - **Testing:** Swift Testing framework (`import Testing`)
@@ -58,10 +58,6 @@ NihonGoStart/
 │   │   ├── phrases.json             # Common phrases by category
 │   │   ├── sentences.json           # Example sentences by topic
 │   │   └── grammar.json             # Grammar points by level/category
-│   │
-│   ├── Support/                     # Support files
-│   │   ├── KeychainManager.swift    # Secure token storage for Apple Music user authorization
-│   │   └── NihonGoStart-Bridging-Header.h
 │   │
 │   ├── Secrets.swift                # API keys (git-ignored, must be created)
 │   └── Assets.xcassets/             # App icons and colors
@@ -144,12 +140,11 @@ For Apple Music integration, credentials are stored in `Secrets.swift`.
 The app uses shared singleton managers for state management:
 - `ComicTranslationManager.shared` - Comic translation state & API calls
 - `BookmarksManager.shared` - Bookmarked translations persistence
-- `MusicManager.shared` - Apple Music integration with MusicKit (search, playback, library, user authorization)
-- `KeychainManager.shared` - Secure token storage for Apple Music user tokens
-- `SpeechManager.shared` - Text-to-speech
+- `MusicManager.shared` - Apple Music integration with MusicKit (search, playback)
+- `SpeechManager.shared` - Text-to-speech (marked `@unchecked Sendable` for Swift 6)
 - `WidgetDataProvider.shared` - Widget flashcard data sync via App Groups
 
-All managers inherit from `ObservableObject` and use `@Published` properties for SwiftUI binding.
+All managers inherit from `ObservableObject` and use `@Published` properties for SwiftUI binding. Most use `@MainActor` for UI thread safety.
 
 ### Data Flow
 ```
@@ -217,47 +212,27 @@ Network calls use Swift async/await with `@MainActor` for UI updates.
 ### Apple Music Integration with MusicKit
 The Songs feature integrates with Apple Music using the native MusicKit framework:
 
-#### User Authorization Flow
-- **Developer Token (JWT)**: Generated from MusicKit credentials for catalog operations
-  - Used for: Searching Apple Music catalog, fetching song metadata, lyrics
-  - Works without user login for catalog search
-- **User Token**: Requested via MusicKit when user taps "Connect to Apple Music"
-  - Stored securely in Keychain (via `KeychainManager`)
-  - Used for: Full track playback, library access, saving songs
-  - Authorization status tracked: `.authorized`, `.denied`, `.notDetermined`, `.restricted`
-
-#### Subscription Status
-- **Subscribed**: User has Apple Music subscription → full track playback, library access
-- **Not Subscribed**: User has Apple ID but no subscription → preview playback only
-- **No Apple Music**: User not logged in → catalog search with preview playback
-- Fallback to preview playback if user lacks subscription
-
 #### MusicKit Features
-- **Search**: `MusicCatalogSearchRequest` for searching songs by artist/title
-- **Playback**: `ApplicationMusicPlayer` for full track playback (subscribers only)
-- **Library**: `MCNLibrary.shared.add()` to save songs to user's library
-- **Subscription Status**: `MusicCatalogSubscriptionRequest` to check user's subscription
-- **Lyrics**: API fetch via REST endpoint with TTML parsing
+- **Search**: Catalog search via MusicKit API or REST API fallback
+- **Developer Token**: JWT generated from MusicKit credentials for catalog operations
+- **Playback**:
+  - Preview playback (30-second clips) via AVPlayer - works for all users
+  - Full track playback via ApplicationMusicPlayer - requires Apple Music subscription
+- **Lyrics**: API fetch via REST endpoint with TTML parsing for synchronized lyrics
+- **Add to Library**: Opens in Apple Music app for manual library addition
 
 #### Key Implementation Details
 - `MusicManager` is `@MainActor` for UI thread safety
-- User token stored in Keychain (not UserDefaults) for security
-- Developer token valid for 6 months (auto-generated on app launch)
-- Catalog search works for all users (no subscription required)
-- Full playback and library features require Apple Music subscription
+- Developer token valid for 6 months (auto-generated on app launch from credentials)
+- Catalog search works for all users (no subscription or login required)
 - Preview playback (30-second clips) available for all tracks
-
-#### Security
-- User tokens stored securely in Keychain via `KeychainManager`
-- Service name: `com.ziqiyang.NihonGoStart.keychain`
-- Tokens persist across app launches until user logs out
-- Logout removes token from Keychain and resets authentication state
+- Full playback requires Apple Music subscription and user authorization
+- Simplified authorization flow - uses MusicKit's built-in authorization when needed
 
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
 - Translation cache persisted across app restarts
 - Cache includes `hasNoText` flag to skip re-processing images without Japanese text
-- Apple Music user token stored in Keychain (not UserDefaults)
 - Bookmarks stored in UserDefaults
 - Widget card data stored in App Group UserDefaults
 
@@ -306,6 +281,8 @@ docker run -p 8000:8000 manga-ocr-server
 - Prefer `@MainActor` classes for UI-bound managers
 - Use `guard` for early returns
 - Enums with associated values for type-safe state
+- **Swift 6 Concurrency**: Mark classes as `@unchecked Sendable` when using non-Sendable types that are safe (e.g., `SpeechManager` uses `AVSpeechSynthesizer` which isn't Sendable but is safe to use from main actor)
+- Use `nonisolated` + `Task { @MainActor in }` pattern for delegate methods that update `@Published` properties
 
 ### SwiftUI Patterns
 - `@Published` properties in ObservableObject for reactive state
@@ -381,16 +358,13 @@ Key functions in `Managers/ComicTranslationManager.swift`:
 6. **Enable MusicKit Capability in Xcode**:
    - Select your app target
    - Signing & Capabilities → + Capability → MusicKit
-7. **Add KeychainManager.swift to Xcode Project**:
-   - File already created at `NihonGoStart/Support/KeychainManager.swift`
-   - Ensure it's added to the main app target
 
 #### Testing Apple Music Integration
-- **Without credentials**: Catalog search and preview playback work
-- **With credentials only**: Full catalog search, preview playback
-- **With user authorization**: Full track playback (if subscribed), library access
-- Test with free Apple ID: Preview playback, catalog search
-- Test with subscription: Full playback, save to library
+- **Without credentials**: Shows setup message, no functionality
+- **With credentials**: Catalog search and preview playback work
+- **With subscription**: Full track playback available
+- Test with free Apple ID: Preview playback only
+- Test with subscription: Full playback
 
 ### Widget Setup (Xcode)
 The widget extension target must be added in Xcode:
