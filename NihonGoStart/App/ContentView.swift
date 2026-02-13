@@ -1,56 +1,6 @@
 import SwiftUI
 import UIKit
 
-// MARK: - App Settings (Dev Mode)
-
-class AppSettings: ObservableObject {
-    static let shared = AppSettings()
-
-    private let devModeKey = "devModeEnabled"
-
-    @Published var isDevModeEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(isDevModeEnabled, forKey: devModeKey)
-            // Update visible tabs when dev mode changes
-            updateVisibleTabs()
-        }
-    }
-
-    @Published var showDevModeToast = false
-    @Published var visibleTabs: [MainTab] = [.learn]
-
-    private init() {
-        isDevModeEnabled = UserDefaults.standard.bool(forKey: devModeKey)
-        updateVisibleTabs()
-    }
-
-    private func updateVisibleTabs() {
-        if isDevModeEnabled {
-            visibleTabs = MainTab.allCases
-        } else {
-            visibleTabs = [.learn]
-        }
-        print("Dev mode: \(isDevModeEnabled), Visible tabs: \(visibleTabs.map { $0.title })")
-    }
-
-    func toggleDevMode() {
-        isDevModeEnabled.toggle()
-
-        // Show toast notification
-        showDevModeToast = true
-
-        // Hide toast after delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.showDevModeToast = false
-        }
-
-        // Haptic feedback
-        let generator = UINotificationFeedbackGenerator()
-        generator.prepare()
-        generator.notificationOccurred(.success)
-    }
-}
-
 // Main tabs: Learn, Songs, Comic
 enum MainTab: Int, CaseIterable, Identifiable {
     case learn = 0
@@ -113,72 +63,47 @@ enum LearnSubTab: Int, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var selectedMainTab: MainTab = .learn
     @State private var selectedLearnSubTab: LearnSubTab = .kana
-    @ObservedObject private var appSettings = AppSettings.shared
 
     var body: some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                // Content area
-                Group {
-                    switch selectedMainTab {
-                    case .learn:
-                        // Learn content
-                        Group {
-                            switch selectedLearnSubTab {
-                            case .kana:
-                                KanaView()
-                            case .kanaPractice:
-                                KanaFlashcardView()
-                            case .vocabulary:
-                                FlashcardView()
-                            case .phrases:
-                                PhrasesView()
-                            case .sentences:
-                                SentencesView()
-                            case .grammar:
-                                GrammarView()
-                            }
+        VStack(spacing: 0) {
+            // Content area
+            Group {
+                switch selectedMainTab {
+                case .learn:
+                    // Learn content
+                    Group {
+                        switch selectedLearnSubTab {
+                        case .kana:
+                            KanaView()
+                        case .kanaPractice:
+                            KanaFlashcardView()
+                        case .vocabulary:
+                            FlashcardView()
+                        case .phrases:
+                            PhrasesView()
+                        case .sentences:
+                            SentencesView()
+                        case .grammar:
+                            GrammarView()
                         }
-                    case .songs:
-                        SongsView()
-                    case .comic:
-                        ComicTranslationView()
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Secondary tab bar for Learn (above main tab bar)
-                if selectedMainTab == .learn {
-                    LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
-                }
-
-                // Main tab bar
-                MainTabBar(selectedTab: $selectedMainTab)
-            }
-            .edgesIgnoringSafeArea(.bottom)
-            .onChange(of: appSettings.isDevModeEnabled) { _, newValue in
-                // Switch to Learn tab if dev mode is disabled and current tab is not visible
-                if !newValue && !appSettings.visibleTabs.contains(selectedMainTab) {
-                    selectedMainTab = .learn
+                case .songs:
+                    SongsView()
+                case .comic:
+                    ComicTranslationView()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Toast notification (shown when toggling dev mode)
-            if appSettings.showDevModeToast {
-                ToastNotification(
-                    message: appSettings.isDevModeEnabled ? "Dev Mode Enabled" : "Normal Mode",
-                    icon: appSettings.isDevModeEnabled ? "hammer.fill" : "eye.slash.fill"
-                )
-                .padding(.top, 60)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            // Secondary tab bar for Learn (above main tab bar)
+            if selectedMainTab == .learn {
+                LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
             }
 
-            // Dev mode indicator (shown at top when in dev mode)
-            if appSettings.isDevModeEnabled {
-                DevModeIndicator()
-                    .padding(.top, 10)
-            }
+            // Main tab bar
+            MainTabBar(selectedTab: $selectedMainTab)
         }
+        .edgesIgnoringSafeArea(.bottom)
     }
 }
 
@@ -239,22 +164,16 @@ struct LearnSubTabButton: View {
 
 struct MainTabBar: View {
     @Binding var selectedTab: MainTab
-    @ObservedObject private var appSettings = AppSettings.shared
-
-    var isSingleTabMode: Bool {
-        appSettings.visibleTabs.count == 1
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
 
             HStack(spacing: 0) {
-                ForEach(appSettings.visibleTabs) { tab in
+                ForEach(MainTab.allCases) { tab in
                     MainTabBarButton(
                         tab: tab,
-                        selectedTab: $selectedTab,
-                        isSingleTabMode: isSingleTabMode
+                        selectedTab: $selectedTab
                     )
                 }
             }
@@ -263,8 +182,6 @@ struct MainTabBar: View {
             .padding(.bottom, getSafeAreaBottom())
             .background(Color(UIColor.secondarySystemBackground))
         }
-        .id(appSettings.visibleTabs.count) // Force view refresh when tabs change
-        .animation(.easeInOut(duration: 0.3), value: appSettings.visibleTabs.count)
     }
 
     func getSafeAreaBottom() -> CGFloat {
@@ -278,132 +195,33 @@ struct MainTabBar: View {
 struct MainTabBarButton: View {
     let tab: MainTab
     @Binding var selectedTab: MainTab
-    let isSingleTabMode: Bool
 
     private var isSelected: Bool {
         selectedTab == tab
     }
 
-    @State private var isPressing = false
-
     var body: some View {
-        ZStack {
-            // Progress indicator for long press (only on Learn tab)
-            if tab == .learn && isPressing {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.red.opacity(0.2))
-                    .frame(height: 49)
-                    .transition(.opacity)
-            }
-
-            Button(action: {
-                selectedTab = tab
-            }) {
-                VStack(spacing: 4) {
-                    ZStack {
-                        Circle()
-                            .fill(isSelected ? Color.red.opacity(0.15) : Color.clear)
-                            .frame(width: 36, height: 36)
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 20))
-                            .scaleEffect(isPressing && tab == .learn ? 1.15 : 1.0)
-                            .animation(.spring(response: 0.3), value: isPressing)
-                    }
-                    .frame(height: 28)
-
-                    if !isSingleTabMode {
-                        Text(tab.title)
-                            .font(.caption2)
-                            .fontWeight(isSelected ? .semibold : .regular)
-                    }
+        Button(action: {
+            selectedTab = tab
+        }) {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.red.opacity(0.15) : Color.clear)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 20))
                 }
-                .foregroundColor(isSelected ? .red : .gray)
-                .frame(maxWidth: .infinity)
-                .frame(height: 49)
+                .frame(height: 28)
+
+                Text(tab.title)
+                    .font(.caption2)
+                    .fontWeight(isSelected ? .semibold : .regular)
             }
-            .buttonStyle(PlainButtonStyle())
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 1.0)
-                    .onChanged { _ in
-                        if tab == .learn && !isPressing {
-                            withAnimation(.easeInOut(duration: 0.1)) {
-                                isPressing = true
-                            }
-                        }
-                    }
-                    .onEnded { _ in
-                        if tab == .learn && isPressing {
-                            isPressing = false
-                            AppSettings.shared.toggleDevMode()
-                        }
-                    }
-            )
+            .foregroundColor(isSelected ? .red : .gray)
+            .frame(maxWidth: .infinity)
+            .frame(height: 49)
         }
-    }
-}
-
-// MARK: - Dev Mode Indicator
-
-struct DevModeIndicator: View {
-    @StateObject private var appSettings = AppSettings.shared
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "hammer.fill")
-                .foregroundColor(.white)
-            Text("Dev Mode")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.white)
-
-            Spacer()
-
-            Button(action: {
-                withAnimation {
-                    appSettings.toggleDevMode()
-                }
-            }) {
-                HStack(spacing: 4) {
-                    Text("Exit")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.caption)
-                }
-                .foregroundColor(.white.opacity(0.9))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.9))
-        .cornerRadius(20)
-        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-        .padding(.horizontal, 16)
-        .transition(.move(edge: .top).combined(with: .opacity))
-    }
-}
-
-// MARK: - Toast Notification
-
-struct ToastNotification: View {
-    let message: String
-    let icon: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(.white)
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(.white)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(
-            Capsule()
-                .fill(Color.black.opacity(0.85))
-        )
-        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-        .padding(.horizontal, 20)
+        .buttonStyle(PlainButtonStyle())
     }
 }
