@@ -117,49 +117,57 @@ struct ContentView: View {
     @StateObject private var appSettings = AppSettings.shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Content area
-            Group {
-                switch selectedMainTab {
-                case .learn:
-                    // Learn content
-                    Group {
-                        switch selectedLearnSubTab {
-                        case .kana:
-                            KanaView()
-                        case .kanaPractice:
-                            KanaFlashcardView()
-                        case .vocabulary:
-                            FlashcardView()
-                        case .phrases:
-                            PhrasesView()
-                        case .sentences:
-                            SentencesView()
-                        case .grammar:
-                            GrammarView()
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                // Content area
+                Group {
+                    switch selectedMainTab {
+                    case .learn:
+                        // Learn content
+                        Group {
+                            switch selectedLearnSubTab {
+                            case .kana:
+                                KanaView()
+                            case .kanaPractice:
+                                KanaFlashcardView()
+                            case .vocabulary:
+                                FlashcardView()
+                            case .phrases:
+                                PhrasesView()
+                            case .sentences:
+                                SentencesView()
+                            case .grammar:
+                                GrammarView()
+                            }
                         }
+                    case .songs:
+                        SongsView()
+                    case .comic:
+                        ComicTranslationView()
                     }
-                case .songs:
-                    SongsView()
-                case .comic:
-                    ComicTranslationView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Secondary tab bar for Learn (above main tab bar)
+                if selectedMainTab == .learn {
+                    LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
+                }
+
+                // Main tab bar
+                MainTabBar(selectedTab: $selectedMainTab)
+            }
+            .edgesIgnoringSafeArea(.bottom)
+            .onChange(of: appSettings.isDevModeEnabled) { _, newValue in
+                // Switch to Learn tab if dev mode is disabled and current tab is not visible
+                if !newValue && !appSettings.visibleTabs.contains(selectedMainTab) {
+                    selectedMainTab = .learn
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Secondary tab bar for Learn (above main tab bar)
-            if selectedMainTab == .learn {
-                LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
-            }
-
-            // Main tab bar
-            MainTabBar(selectedTab: $selectedMainTab)
-        }
-        .edgesIgnoringSafeArea(.bottom)
-        .onChange(of: appSettings.isDevModeEnabled) { _, newValue in
-            // Switch to Learn tab if dev mode is disabled and current tab is not visible
-            if !newValue && !appSettings.visibleTabs.contains(selectedMainTab) {
-                selectedMainTab = .learn
+            // Dev mode indicator (shown at top when in dev mode)
+            if appSettings.isDevModeEnabled {
+                DevModeIndicator()
+                    .padding(.top, 50)
             }
         }
     }
@@ -322,5 +330,46 @@ struct MainTabBarButton: View {
                     }
                 }
         )
+    }
+}
+
+// MARK: - Dev Mode Indicator
+
+struct DevModeIndicator: View {
+    @StateObject private var appSettings = AppSettings.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "hammer.fill")
+                .foregroundColor(.white)
+            Text("Dev Mode")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+
+            Spacer()
+
+            Button(action: {
+                withAnimation {
+                    appSettings.toggleDevMode()
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Text("Exit")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                }
+                .foregroundColor(.white.opacity(0.9))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.9))
+        .cornerRadius(20)
+        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 16)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
