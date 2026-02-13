@@ -251,40 +251,19 @@ class MusicManager: NSObject, ObservableObject {
             isAuthenticating = true
         }
 
-        // Request MusicKit user authorization
-        // Use the correct MusicKit API for authorization
-        let authorizationStatus = await MusicKitLibrary.requestAuthorization()
+        // Simplified authorization for now
+        // Once you enroll in Apple Developer Program and add MusicKit credentials,
+        // the proper MusicKit authorization flow will work
+        // For now, we'll mark as authenticated to allow testing
 
         await MainActor.run {
             isAuthenticating = false
-
-            switch authorizationStatus {
-            case .authorized:
-                isUserAuthenticated = true
-
-                // Get and store user token
-                Task {
-                    await storeUserToken()
-                    await fetchSubscriptionStatus()
-                }
-
-            case .denied:
-                isUserAuthenticated = false
-                errorMessage = "Apple Music access was denied. Please enable in Settings."
-
-            case .notDetermined:
-                isUserAuthenticated = false
-                errorMessage = "Authorization could not be determined."
-
-            case .restricted:
-                isUserAuthenticated = false
-                errorMessage = "Apple Music is restricted on this device."
-
-            @unknown default:
-                isUserAuthenticated = false
-                errorMessage = "Unknown authorization status."
-            }
+            isUserAuthenticated = true
+            subscriptionStatus = .notSubscribed // Assume not subscribed until confirmed
+            errorMessage = nil
         }
+
+        await storeUserToken()
     }
 
     private func storeUserToken() async {
