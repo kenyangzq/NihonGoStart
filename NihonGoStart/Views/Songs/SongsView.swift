@@ -3,84 +3,94 @@ import AVFoundation
 import UIKit
 
 struct SongsView: View {
-    @StateObject private var spotifyManager = SpotifyManager.shared
+    @StateObject private var musicManager = MusicManager.shared
     @State private var searchText = ""
-    @State private var selectedTrack: SpotifyTrack?
+    @State private var selectedTrack: AppleMusicTrack?
     @State private var showLyricsView = false
+    @State private var showStorefrontPicker = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // Storefront Selector
+                StorefrontPickerBar(
+                    selectedStorefront: $musicManager.preferredStorefront,
+                    onStorefrontChange: { storefront in
+                        musicManager.setStorefront(storefront)
+                    },
+                    onChangePicker: {
+                        showStorefrontPicker.toggle()
+                    }
+                )
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(UIColor.secondarySystemBackground))
+
                 // Search Bar
                 SearchBar(text: $searchText, onSearch: {
                     Task {
-                        await spotifyManager.searchJapaneseSongs(query: searchText)
+                        await musicManager.searchJapaneseSongs(query: searchText)
                     }
                 })
                 .padding()
 
-                if spotifyManager.needsConfiguration {
-                    // Spotify not configured
+                if !musicManager.isConfigured {
+                    // Apple Music not configured
                     VStack(spacing: 20) {
-                        Image(systemName: "gearshape.2")
+                        Image(systemName: "music.note")
                             .font(.system(size: 60))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.red)
 
                         Text("Setup Required")
                             .font(.title2)
                             .fontWeight(.bold)
 
-                        Text("To use the Songs feature, you need to:\n\n1. Go to developer.spotify.com/dashboard\n2. Create an app to get credentials\n3. Add your Client ID and Secret\n   in SpotifyManager.swift")
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                            .font(.subheadline)
-                            .padding(.horizontal)
-                    }
-                    .frame(maxHeight: .infinity)
-                } else if spotifyManager.isAuthenticating {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Connecting to Spotify...")
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxHeight: .infinity)
-                } else if !spotifyManager.isAuthenticated && spotifyManager.accessToken == nil {
-                    // Not authenticated yet
-                    VStack(spacing: 20) {
-                        Image(systemName: "music.note.list")
-                            .font(.system(size: 60))
-                            .foregroundColor(.green)
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("To use the Songs feature, you need to:")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
 
-                        Text("Japanese Songs")
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("1. Enroll in Apple Developer Program")
+                                Text("2. Create a MusicKit Key in App Store Connect")
+                                Text("3. Add your credentials in Secrets.swift:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text("   - appleMusicTeamId")
+                                Text("   - appleMusicKeyId")
+                                Text("   - appleMusicPrivateKey (base64 encoded)")
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding()
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(12)
+
+                        Text("See instructions in Secrets.swift for details")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .frame(maxHeight: .infinity)
+                } else if !musicManager.isAuthenticated {
+                    // Not authenticated
+                    VStack(spacing: 20) {
+                        Image(systemName: "music.note")
+                            .font(.system(size: 60))
+                            .foregroundColor(.red)
+
+                        Text("Connecting to Apple Music...")
                             .font(.title2)
                             .fontWeight(.bold)
 
-                        Text("Search and listen to Japanese songs\nwith lyrics to learn the language")
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-
-                        Button(action: {
-                            Task {
-                                await spotifyManager.authenticate()
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "link")
-                                Text("Connect to Spotify")
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(Color.green)
-                            .cornerRadius(25)
-                        }
+                        ProgressView()
                     }
                     .frame(maxHeight: .infinity)
-                } else if spotifyManager.isSearching {
+                } else if musicManager.isSearching {
                     ProgressView("Searching...")
                         .frame(maxHeight: .infinity)
-                } else if spotifyManager.searchResults.isEmpty && !searchText.isEmpty {
+                } else if musicManager.searchResults.isEmpty && !searchText.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 40))
@@ -93,11 +103,11 @@ struct SongsView: View {
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxHeight: .infinity)
-                } else if spotifyManager.searchResults.isEmpty {
+                } else if musicManager.searchResults.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "music.quarternote.3")
                             .font(.system(size: 50))
-                            .foregroundColor(.green.opacity(0.7))
+                            .foregroundColor(.red.opacity(0.7))
 
                         Text("Search for Japanese Songs")
                             .font(.headline)
@@ -107,11 +117,11 @@ struct SongsView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
-                            ForEach(["YOASOBI", "Ado", "Official髭男dism", "King Gnu", "米津玄師"], id: \.self) { artist in
+                            ForEach(["YOASOBI", "Ado", "Official髭男dism", "King Gnu", "米津玄師", "Aimyon"], id: \.self) { artist in
                                 Button(action: {
                                     searchText = artist
                                     Task {
-                                        await spotifyManager.searchJapaneseSongs(query: artist)
+                                        await musicManager.searchJapaneseSongs(query: artist)
                                     }
                                 }) {
                                     HStack {
@@ -119,7 +129,7 @@ struct SongsView: View {
                                             .font(.caption)
                                         Text(artist)
                                     }
-                                    .foregroundColor(.green)
+                                    .foregroundColor(.red)
                                 }
                             }
                         }
@@ -130,19 +140,19 @@ struct SongsView: View {
                     .frame(maxHeight: .infinity)
                 } else {
                     // Search Results
-                    List(spotifyManager.searchResults) { track in
+                    List(musicManager.searchResults) { track in
                         SongRowView(
                             track: track,
-                            isPlaying: spotifyManager.currentTrack?.id == track.id && spotifyManager.isPlaying,
+                            isPlaying: musicManager.currentTrack?.id == track.id && musicManager.isPlaying,
                             onPlay: {
-                                spotifyManager.togglePlayback(track: track)
+                                musicManager.togglePlayback(track)
                             },
                             onLyrics: {
                                 selectedTrack = track
                                 showLyricsView = true
                             },
-                            onOpenSpotify: {
-                                spotifyManager.openInSpotify(track: track)
+                            onOpenInMusic: {
+                                musicManager.openInAppleMusic(track)
                             }
                         )
                     }
@@ -150,10 +160,10 @@ struct SongsView: View {
                 }
 
                 // Now Playing Bar
-                if let currentTrack = spotifyManager.currentTrack, spotifyManager.isPlaying {
+                if let currentTrack = musicManager.currentTrack, musicManager.isPlaying {
                     NowPlayingBar(
                         track: currentTrack,
-                        onStop: { spotifyManager.stopPlayback() },
+                        onStop: { musicManager.stopPlayback() },
                         onLyrics: {
                             selectedTrack = currentTrack
                             showLyricsView = true
@@ -162,7 +172,7 @@ struct SongsView: View {
                 }
 
                 // Error Message
-                if let error = spotifyManager.errorMessage {
+                if let error = musicManager.errorMessage {
                     Text(error)
                         .font(.caption)
                         .foregroundColor(.red)
@@ -183,6 +193,52 @@ struct SongsView: View {
                 if let track = selectedTrack {
                     LyricsView(track: track)
                 }
+            }
+        }
+    }
+}
+
+struct StorefrontPickerBar: View {
+    @Binding var selectedStorefront: String
+    let onStorefrontChange: (String) -> Void
+    let onChangePicker: () -> Void
+
+    private let storefronts: [(code: String, name: String, flag: String)] = [
+        ("jp", "Japan", "🇯🇵"),
+        ("us", "United States", "🇺🇸")
+    ]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Music Store:")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            ForEach(storefronts, id: \.code) { storefront in
+                Button(action: {
+                    onStorefrontChange(storefront.code)
+                }) {
+                    HStack(spacing: 4) {
+                        Text(storefront.flag)
+                            .font(.caption)
+                        Text(storefront.name)
+                            .font(.caption)
+                            .fontWeight(selectedStorefront == storefront.code ? .bold : .regular)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(selectedStorefront == storefront.code ? Color.red.opacity(0.15) : Color.clear)
+                    .foregroundColor(selectedStorefront == storefront.code ? .red : .secondary)
+                    .cornerRadius(12)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onChangePicker) {
+                Image(systemName: "info.circle")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -212,7 +268,7 @@ struct SearchBar: View {
 
             Button(action: onSearch) {
                 Text("Search")
-                    .foregroundColor(.green)
+                    .foregroundColor(.red)
                     .fontWeight(.medium)
             }
         }
@@ -223,16 +279,16 @@ struct SearchBar: View {
 }
 
 struct SongRowView: View {
-    let track: SpotifyTrack
+    let track: AppleMusicTrack
     let isPlaying: Bool
     let onPlay: () -> Void
     let onLyrics: () -> Void
-    let onOpenSpotify: () -> Void
+    let onOpenInMusic: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             // Album Art
-            AsyncImage(url: URL(string: track.albumImageURL ?? "")) { image in
+            AsyncImage(url: URL(string: track.artworkURL ?? "")) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -258,6 +314,12 @@ struct SongRowView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+
+                if let duration = track.duration {
+                    Text(formatDuration(duration))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
@@ -268,7 +330,7 @@ struct SongRowView: View {
                 Button(action: onPlay) {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 32))
-                        .foregroundColor(track.previewURL != nil ? .green : .gray)
+                        .foregroundColor(track.previewURL != nil ? .red : .gray)
                 }
                 .disabled(track.previewURL == nil)
 
@@ -282,26 +344,32 @@ struct SongRowView: View {
                         .cornerRadius(8)
                 }
 
-                // Open in Spotify
-                Button(action: onOpenSpotify) {
+                // Open in Apple Music
+                Button(action: onOpenInMusic) {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 16))
-                        .foregroundColor(.green)
+                        .foregroundColor(.red)
                 }
             }
         }
         .padding(.vertical, 4)
     }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let minutes = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
 }
 
 struct NowPlayingBar: View {
-    let track: SpotifyTrack
+    let track: AppleMusicTrack
     let onStop: () -> Void
     let onLyrics: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: URL(string: track.albumImageURL ?? "")) { image in
+            AsyncImage(url: URL(string: track.artworkURL ?? "")) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -340,7 +408,7 @@ struct NowPlayingBar: View {
             Button(action: onStop) {
                 Image(systemName: "stop.circle.fill")
                     .font(.system(size: 28))
-                    .foregroundColor(.green)
+                    .foregroundColor(.red)
             }
         }
         .padding(.horizontal)
@@ -355,7 +423,7 @@ struct SoundBar: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color.green)
+            .fill(Color.red)
             .frame(width: 3, height: height)
             .cornerRadius(1.5)
             .onAppear {
@@ -371,13 +439,14 @@ struct SoundBar: View {
 }
 
 struct LyricsView: View {
-    let track: SpotifyTrack
-    @StateObject private var spotifyManager = SpotifyManager.shared
+    let track: AppleMusicTrack
+    @StateObject private var musicManager = MusicManager.shared
     @State private var lyrics: [LyricLine] = []
     @State private var isLoadingLyrics = true
     @State private var lyricsInput = ""
     @State private var showLyricsInput = false
     @State private var expandedLineId: UUID?
+    @State private var currentLyricIndex: Int?
     @Environment(\.dismiss) private var dismiss
     private let speechManager = SpeechManager.shared
 
@@ -386,7 +455,7 @@ struct LyricsView: View {
             VStack(spacing: 0) {
                 // Track Header
                 HStack(spacing: 12) {
-                    AsyncImage(url: URL(string: track.albumImageURL ?? "")) { image in
+                    AsyncImage(url: URL(string: track.artworkURL ?? "")) { image in
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -410,11 +479,11 @@ struct LyricsView: View {
 
                     // Play Button
                     Button(action: {
-                        spotifyManager.togglePlayback(track: track)
+                        musicManager.togglePlayback(track)
                     }) {
-                        Image(systemName: spotifyManager.currentTrack?.id == track.id && spotifyManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        Image(systemName: musicManager.currentTrack?.id == track.id && musicManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 44))
-                            .foregroundColor(track.previewURL != nil ? .green : .gray)
+                            .foregroundColor(track.previewURL != nil ? .red : .gray)
                     }
                     .disabled(track.previewURL == nil)
                 }
@@ -462,7 +531,7 @@ struct LyricsView: View {
                             Text("No Lyrics Available")
                                 .font(.headline)
 
-                            Text("Lyrics are not automatically available.\nYou can paste lyrics manually.")
+                            Text("Lyrics from Apple Music are not available.\nYou can paste lyrics manually.")
                                 .multilineTextAlignment(.center)
                                 .foregroundColor(.secondary)
                                 .font(.caption)
@@ -488,28 +557,39 @@ struct LyricsView: View {
                     .frame(maxHeight: .infinity)
                 } else {
                     // Lyrics Display
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(lyrics) { line in
-                                LyricLineView(
-                                    line: line,
-                                    isExpanded: expandedLineId == line.id,
-                                    onTap: {
-                                        withAnimation {
-                                            if expandedLineId == line.id {
-                                                expandedLineId = nil
-                                            } else {
-                                                expandedLineId = line.id
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
+                                    LyricLineView(
+                                        line: line,
+                                        isExpanded: expandedLineId == line.id,
+                                        isActive: currentLyricIndex == index,
+                                        onTap: {
+                                            withAnimation {
+                                                if expandedLineId == line.id {
+                                                    expandedLineId = nil
+                                                } else {
+                                                    expandedLineId = line.id
+                                                }
                                             }
+                                        },
+                                        onSpeak: {
+                                            speechManager.speak(line.japanese, rate: 0.7)
                                         }
-                                    },
-                                    onSpeak: {
-                                        speechManager.speak(line.japanese, rate: 0.7)
-                                    }
-                                )
+                                    )
+                                    .id(index)
+                                }
+                            }
+                            .padding()
+                        }
+                        .onChange(of: currentLyricIndex) { oldValue, newValue in
+                            if let index = newValue {
+                                withAnimation {
+                                    proxy.scrollTo(index, anchor: .center)
+                                }
                             }
                         }
-                        .padding()
                     }
                 }
             }
@@ -531,11 +611,33 @@ struct LyricsView: View {
                 }
             }
             .onAppear {
+                // Try to fetch from Apple Music first
+                Task {
+                    await fetchLyricsFromAppleMusic()
+                }
+
                 // Simulate loading - in a real app, you'd fetch from a lyrics API
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    isLoadingLyrics = false
+                    if lyrics.isEmpty {
+                        isLoadingLyrics = false
+                    }
                 }
             }
+        }
+    }
+
+    private func fetchLyricsFromAppleMusic() async {
+        // Check if MusicManager has lyrics for this track
+        if musicManager.currentTrack?.id == track.id && !musicManager.currentLyrics.isEmpty {
+            lyrics = musicManager.currentLyrics.map { appleLyric in
+                LyricLine(
+                    japanese: appleLyric.content,
+                    romaji: nil,
+                    translation: nil,
+                    timestamp: appleLyric.startTime
+                )
+            }
+            isLoadingLyrics = false
         }
     }
 
@@ -562,6 +664,7 @@ struct LyricsView: View {
 struct LyricLineView: View {
     let line: LyricLine
     let isExpanded: Bool
+    let isActive: Bool
     let onTap: () -> Void
     let onSpeak: () -> Void
     @State private var generatedRomaji: String?
@@ -573,6 +676,7 @@ struct LyricLineView: View {
             HStack {
                 Text(line.japanese)
                     .font(.system(size: 18, design: .serif))
+                    .foregroundColor(isActive ? .red : .primary)
 
                 Spacer()
 

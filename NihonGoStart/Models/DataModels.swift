@@ -161,6 +161,39 @@ struct Sentence: Identifiable, Codable {
 
 // MARK: - Songs & Lyrics
 
+// Apple Music Models
+
+struct AppleMusicTrack: Identifiable {
+    let id: String
+    let catalogId: String
+    let name: String
+    let artist: String
+    let albumName: String
+    let artworkURL: String?
+    let duration: Double? // in seconds
+    let previewURL: String?
+    let appleMusicURL: String?
+    let storefront: String // "jp", "us", etc.
+}
+
+struct AppleMusicLyric: Identifiable {
+    let id: UUID
+    let content: String
+    let startTime: Double // in seconds
+    let endTime: Double // in seconds
+}
+
+struct AppleMusicAlbum: Identifiable {
+    let id: String
+    let name: String
+    let artist: String
+    let artworkURL: String?
+    let releaseDate: String?
+    let storefront: String
+}
+
+// Spotify Models (deprecated, kept for backward compatibility)
+
 struct SpotifyTrack: Identifiable {
     let id: String
     let name: String
@@ -169,6 +202,25 @@ struct SpotifyTrack: Identifiable {
     let albumImageURL: String?
     let previewURL: String?
     let spotifyURI: String
+}
+
+struct SpotifyUserProfile: Codable {
+    let displayName: String?
+    let id: String
+    let images: [SpotifyImage]?
+    let email: String?
+    let product: String? // "premium", "free", etc.
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case id, images, email, product
+    }
+}
+
+struct SpotifyImage: Codable {
+    let url: String
+    let height: Int?
+    let width: Int?
 }
 
 struct LyricLine: Identifiable {

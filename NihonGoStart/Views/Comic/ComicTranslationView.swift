@@ -763,8 +763,6 @@ struct ComicTranslationView: View {
             return
         }
 
-        let currentLanguage = targetLanguage.rawValue
-
         await MainActor.run {
             loadingProgress = "Preparing..."
 
@@ -833,7 +831,6 @@ struct ComicTranslationView: View {
         manager.sessionCurrentPageIndex = 0
         manager.clearCache()
 
-        let currentLanguage = targetLanguage.rawValue
         let pages = manager.sessionPDFPages
 
         // Hide loading indicator

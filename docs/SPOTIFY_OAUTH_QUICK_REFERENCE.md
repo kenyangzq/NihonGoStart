@@ -1,3 +1,37 @@
+# Spotify OAuth Implementation - Quick Reference
+
+## Complete Implementation Files
+
+### 1. DataModels.swift - Add at end of file (before last `}`)
+
+```swift
+// MARK: - Spotify User Profile
+
+struct SpotifyUserProfile: Codable {
+    let displayName: String?
+    let id: String
+    let images: [SpotifyImage]?
+    let email: String?
+    let product: String? // "premium", "free", etc.
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case id, images, email, product
+    }
+}
+
+struct SpotifyImage: Codable {
+    let url: String
+    let height: Int?
+    let width: Int?
+}
+```
+
+---
+
+### 2. SpotifyManager.swift - Complete OAuth Implementation
+
+```swift
 import Foundation
 import AVFoundation
 import UIKit
@@ -7,9 +41,8 @@ import AuthenticationServices
 class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
     static let shared = SpotifyManager()
 
-    // IMPORTANT: Replace these with your own Spotify API credentials
-    // Get them from https://developer.spotify.com/dashboard
-    // Or add them to Secrets.swift
+    // MARK: - Configuration
+
     private let clientId: String
     private let clientSecret: String
 
@@ -34,8 +67,9 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
     private var codeVerifier: String?
     private var codeChallenge: String?
 
-    override init() {
-        // Try to get credentials from Secrets.swift first, fallback to placeholder
+    // MARK: - Initialization
+
+    init() {
         if Secrets.spotifyClientId != "" && Secrets.spotifyClientSecret != "" {
             self.clientId = Secrets.spotifyClientId
             self.clientSecret = Secrets.spotifyClientSecret
@@ -51,11 +85,11 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
 
     // MARK: - Published Properties
 
-    // App-level access token (Client Credentials flow)
+    // App-level access (Client Credentials)
     @Published var accessToken: String?
     @Published var isAuthenticated = false
 
-    // User-level access token (OAuth with PKCE)
+    // User-level access (OAuth with PKCE)
     @Published var userAccessToken: String?
     @Published var userRefreshToken: String?
     @Published var userProfile: SpotifyUserProfile?
@@ -70,71 +104,10 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
     private var audioPlayer: AVPlayer?
     @Published var isPlaying = false
     @Published var currentTrack: SpotifyTrack?
-
     private var tokenExpirationDate: Date?
 
-    // MARK: - Authentication
+    // MARK: - PKCE Helpers
 
-    // Client Credentials Flow (for app-level API access)
-    func authenticate() async {
-        // Check if already authenticating or if credentials not set
-        if needsConfiguration {
-            await MainActor.run {
-                self.errorMessage = "Spotify API credentials not configured. Please add your Client ID and Secret in SpotifyManager.swift"
-            }
-            return
-        }
-
-        await MainActor.run {
-            self.isAuthenticating = true
-            self.errorMessage = nil
-        }
-
-        let tokenURL = "https://accounts.spotify.com/api/token"
-        let credentials = "\(clientId):\(clientSecret)"
-        guard let credentialsData = credentials.data(using: .utf8) else {
-            await MainActor.run {
-                self.isAuthenticating = false
-            }
-            return
-        }
-        let base64Credentials = credentialsData.base64EncodedString()
-
-        var request = URLRequest(url: URL(string: tokenURL)!)
-        request.httpMethod = "POST"
-        request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "grant_type=client_credentials".data(using: .utf8)
-        request.timeoutInterval = 10 // 10 second timeout
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let token = json["access_token"] as? String {
-                await MainActor.run {
-                    self.accessToken = token
-                    self.isAuthenticated = true
-                    self.isAuthenticating = false
-                    self.errorMessage = nil
-                }
-            } else if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let error = json["error"] as? String {
-                await MainActor.run {
-                    self.isAuthenticating = false
-                    self.errorMessage = "Spotify error: \(error)"
-                }
-            }
-        } catch {
-            await MainActor.run {
-                self.isAuthenticating = false
-                self.errorMessage = "Connection failed. Check your internet connection."
-            }
-        }
-    }
-
-    // MARK: - OAuth 2.0 with PKCE (User Login)
-
-    // Generate code verifier for PKCE
     private func generateCodeVerifier() -> String {
         var buffer = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, buffer.count, &buffer)
@@ -145,7 +118,6 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         return codeVerifier
     }
 
-    // Generate code challenge from verifier
     private func generateCodeChallenge(verifier: String) -> String {
         guard let data = verifier.data(using: .utf8) else { return "" }
         let hashed = SHA256.hash(data: data)
@@ -156,9 +128,9 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         return challenge
     }
 
-    // Build authorization URL
+    // MARK: - OAuth Login Flow
+
     private func buildAuthURL() -> URL? {
-        // Generate PKCE values
         codeVerifier = generateCodeVerifier()
         codeChallenge = generateCodeChallenge(verifier: codeVerifier!)
 
@@ -175,14 +147,12 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         return components?.url
     }
 
-    // Login with Spotify (OAuth with PKCE)
     func login() {
         guard let authURL = buildAuthURL() else {
             errorMessage = "Failed to build authorization URL"
             return
         }
 
-        // Use ASWebAuthenticationSession for OAuth flow
         let authSession = ASWebAuthenticationSession(
             url: authURL,
             callbackURLScheme: "nihongostart"
@@ -201,7 +171,6 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
                 return
             }
 
-            // Extract authorization code from callback URL
             guard let code = self?.extractCode(from: callbackURL) else {
                 DispatchQueue.main.async {
                     self?.errorMessage = "Failed to extract authorization code"
@@ -209,7 +178,6 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
                 return
             }
 
-            // Exchange code for access token
             Task {
                 await self?.exchangeCodeForToken(code: code)
             }
@@ -219,13 +187,11 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         authSession.start()
     }
 
-    // Extract authorization code from callback URL
     private func extractCode(from url: URL) -> String? {
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         return components?.queryItems?.first(where: { $0.name == "code" })?.value
     }
 
-    // Exchange authorization code for access token
     func exchangeCodeForToken(code: String) async {
         guard let verifier = codeVerifier,
               let url = URL(string: tokenURL) else {
@@ -267,10 +233,7 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
                         self.errorMessage = nil
                     }
 
-                    // Save to UserDefaults
                     saveUserSession()
-
-                    // Fetch user profile
                     await getUserProfile()
                 } else if let error = json["error"] as? String {
                     await MainActor.run {
@@ -285,7 +248,8 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         }
     }
 
-    // Refresh access token
+    // MARK: - Token Management
+
     func refreshUserAccessToken() async {
         guard let refreshToken = userRefreshToken,
               let url = URL(string: tokenURL) else {
@@ -321,14 +285,12 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
                         self.tokenExpirationDate = expirationDate
                     }
 
-                    // Update refresh token if a new one is provided
                     if let newRefreshToken = json["refresh_token"] as? String {
                         await MainActor.run {
                             self.userRefreshToken = newRefreshToken
                         }
                     }
 
-                    // Save to UserDefaults
                     saveUserSession()
                 } else if let error = json["error"] as? String {
                     await MainActor.run {
@@ -343,7 +305,8 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         }
     }
 
-    // Get user profile
+    // MARK: - User Profile
+
     func getUserProfile() async {
         guard let accessToken = userAccessToken,
               let url = URL(string: "https://api.spotify.com/v1/me") else {
@@ -362,7 +325,6 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
                 self.userProfile = profile
             }
 
-            // Save to UserDefaults
             saveUserProfile()
         } catch {
             await MainActor.run {
@@ -371,23 +333,20 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         }
     }
 
-    // Logout
+    // MARK: - Session Management
+
     func logout() {
-        // Clear user session
         userAccessToken = nil
         userRefreshToken = nil
         userProfile = nil
         isLoggedIn = false
         tokenExpirationDate = nil
 
-        // Clear UserDefaults
         UserDefaults.standard.removeObject(forKey: userAccessTokenKey)
         UserDefaults.standard.removeObject(forKey: userRefreshTokenKey)
         UserDefaults.standard.removeObject(forKey: tokenExpirationKey)
         UserDefaults.standard.removeObject(forKey: userProfileKey)
     }
-
-    // MARK: - Session Persistence
 
     private func saveUserSession() {
         UserDefaults.standard.set(userAccessToken, forKey: userAccessTokenKey)
@@ -417,11 +376,9 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
             userProfile = profile
         }
 
-        // Check if token is expired
         if let expiration = tokenExpirationDate, expiration > Date() {
             isLoggedIn = true
         } else {
-            // Token expired, try to refresh
             if userRefreshToken != nil {
                 Task {
                     await refreshUserAccessToken()
@@ -438,150 +395,223 @@ class SpotifyManager: NSObject, ObservableObject, ASWebAuthenticationPresentatio
         return ASPresentationAnchor()
     }
 
-    // MARK: - Search
+    // ... rest of existing methods (authenticate, searchJapaneseSongs, etc.)
+}
+```
 
-    func searchJapaneseSongs(query: String) async {
-        // Use user access token if available (for better personalization), otherwise use app token
-        var token = userAccessToken
+---
 
-        // If user is logged in but token is expired, try to refresh
-        if isLoggedIn && token == nil {
-            await refreshUserAccessToken()
-            token = userAccessToken
-        }
+### 3. NihonGoStartApp.swift - Add URL Handling
 
-        // Fall back to app-level token if no user token
-        if token == nil {
-            if accessToken == nil {
-                await authenticate()
-            }
-            token = accessToken
-        }
+```swift
+import SwiftUI
+import WidgetKit
 
-        guard token != nil else { return }
-
-        await MainActor.run {
-            self.isSearching = true
-            self.searchResults = []
-        }
-
-        // Add Japanese market and filter for Japanese content
-        let searchQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let urlString = "https://api.spotify.com/v1/search?q=\(searchQuery)&type=track&market=JP&limit=20"
-
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token ?? "")", forHTTPHeaderField: "Authorization")
-
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let tracks = parseSearchResults(data: data)
-            await MainActor.run {
-                self.searchResults = tracks
-                self.isSearching = false
-            }
-        } catch {
-            await MainActor.run {
-                self.errorMessage = "Search failed: \(error.localizedDescription)"
-                self.isSearching = false
-            }
+@main
+struct NihonGoStartApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .onAppear {
+                    WidgetDataProvider.shared.syncDataFromApp()
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
+                .onOpenURL { url in
+                    handleIncomingURL(url)
+                }
         }
     }
 
-    private func parseSearchResults(data: Data) -> [SpotifyTrack] {
-        var tracks: [SpotifyTrack] = []
-
-        do {
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let tracksData = json["tracks"] as? [String: Any],
-               let items = tracksData["items"] as? [[String: Any]] {
-
-                for item in items {
-                    guard let id = item["id"] as? String,
-                          let name = item["name"] as? String,
-                          let uri = item["uri"] as? String else { continue }
-
-                    let artists = item["artists"] as? [[String: Any]] ?? []
-                    let artistName = artists.first?["name"] as? String ?? "Unknown Artist"
-
-                    let album = item["album"] as? [String: Any] ?? [:]
-                    let albumName = album["name"] as? String ?? "Unknown Album"
-                    let images = album["images"] as? [[String: Any]] ?? []
-                    let imageURL = images.first?["url"] as? String
-
-                    let previewURL = item["preview_url"] as? String
-
-                    let track = SpotifyTrack(
-                        id: id,
-                        name: name,
-                        artist: artistName,
-                        albumName: albumName,
-                        albumImageURL: imageURL,
-                        previewURL: previewURL,
-                        spotifyURI: uri
-                    )
-                    tracks.append(track)
+    private func handleIncomingURL(_ url: URL) {
+        if url.scheme == "nihongostart" {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+                Task {
+                    await SpotifyManager.shared.exchangeCodeForToken(code: code)
                 }
             }
-        } catch {
-            print("Parse error: \(error)")
-        }
-
-        return tracks
-    }
-
-    // MARK: - Playback (Preview only with Client Credentials)
-
-    func playPreview(track: SpotifyTrack) {
-        guard let previewURLString = track.previewURL,
-              let url = URL(string: previewURLString) else {
-            errorMessage = "No preview available for this track. Open in Spotify to listen."
-            return
-        }
-
-        stopPlayback()
-
-        let playerItem = AVPlayerItem(url: url)
-        audioPlayer = AVPlayer(playerItem: playerItem)
-        audioPlayer?.play()
-
-        currentTrack = track
-        isPlaying = true
-
-        // Listen for when playback ends
-        NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: playerItem,
-            queue: .main
-        ) { [weak self] _ in
-            self?.isPlaying = false
-        }
-    }
-
-    func stopPlayback() {
-        audioPlayer?.pause()
-        audioPlayer = nil
-        isPlaying = false
-    }
-
-    func togglePlayback(track: SpotifyTrack) {
-        if currentTrack?.id == track.id && isPlaying {
-            stopPlayback()
-        } else {
-            playPreview(track: track)
-        }
-    }
-
-    func openInSpotify(track: SpotifyTrack) {
-        // Try to open in Spotify app first, fall back to web
-        // Spotify URI format: spotify:track:<id>
-        // But for UIApplication.open, we need https:// or spotify:// URL scheme
-        if let appURL = URL(string: "spotify://track/\(track.id)"),
-           UIApplication.shared.canOpenURL(appURL) {
-            UIApplication.shared.open(appURL)
-        } else if let webURL = URL(string: "https://open.spotify.com/track/\(track.id)") {
-            UIApplication.shared.open(webURL)
         }
     }
 }
+```
+
+---
+
+### 4. SongsView.swift - Add User Profile UI
+
+**Add to body, after navigationTitle:**
+```swift
+// User Profile Bar (shown when logged in)
+if spotifyManager.isLoggedIn, let profile = spotifyManager.userProfile {
+    UserProfileBar(
+        profile: profile,
+        onLogout: {
+            spotifyManager.logout()
+        }
+    )
+    .padding(.horizontal)
+    .padding(.vertical, 8)
+    .background(Color(UIColor.secondarySystemBackground))
+}
+```
+
+**Update welcome screen button:**
+```swift
+Button(action: {
+    spotifyManager.login()
+}) {
+    HStack {
+        Image(systemName: "person.badge.plus")
+        Text("Login with Spotify")
+    }
+    .foregroundColor(.white)
+    .padding(.horizontal, 24)
+    .padding(.vertical, 12)
+    .background(Color.green)
+    .cornerRadius(25)
+}
+
+Text("Login to save favorites and get personalized recommendations")
+    .font(.caption)
+    .foregroundColor(.secondary)
+    .multilineTextAlignment(.center)
+```
+
+**Add UserProfileBar component at end of file:**
+```swift
+struct UserProfileBar: View {
+    let profile: SpotifyUserProfile
+    let onLogout: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: URL(string: profile.images?.first?.url ?? "")) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Circle()
+                    .fill(Color.green.opacity(0.3))
+                    .overlay(Image(systemName: "person.fill").foregroundColor(.green))
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.displayName ?? "Spotify User")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+
+                if let product = profile.product {
+                    Text(product.capitalized)
+                        .font(.caption2)
+                        .foregroundColor(product == "premium" ? .green : .secondary)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onLogout) {
+                HStack(spacing: 4) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right").font(.caption)
+                    Text("Logout").font(.caption)
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(15)
+            }
+        }
+    }
+}
+```
+
+---
+
+## Configuration Checklist
+
+### Spotify Dashboard
+- [ ] Redirect URI: `nihongostart://callback`
+- [ ] Scopes enabled:
+  - [ ] user-read-private
+  - [ ] user-read-email
+  - [ ] user-library-read
+  - [ ] user-top-read
+
+### Xcode Target Settings
+- [ ] URL Scheme: `nihongostart`
+- [ ] Role: Editor
+- [ ] (Optional) URL Scheme: `spotify`
+
+### Secrets.swift
+- [ ] spotifyClientId configured
+- [ ] spotifyClientSecret configured
+
+---
+
+## Testing Flow
+
+1. **Build & Run App**
+2. **Navigate to Songs Tab**
+3. **Tap "Login with Spotify"**
+4. **Complete Spotify Login**
+5. **Verify Profile Appears**
+6. **Kill App & Relaunch** (test persistence)
+7. **Test Search** (should use user token)
+8. **Test Logout**
+9. **Verify Login Screen Returns**
+
+---
+
+## Key Implementation Points
+
+### PKCE Security
+- Code verifier: 32 random bytes → base64url encoded
+- Code challenge: SHA256(verifier) → base64url encoded
+- Prevents authorization code interception
+
+### Token Storage
+- UserDefaults for simplicity (acceptable for tokens)
+- Access token: 1 hour expiry
+- Refresh token: long-lived
+- Auto-refresh on app launch if expired
+
+### User Experience
+- Native Safari authentication (ASWebAuthenticationSession)
+- Seamless redirect back to app
+- Persistent login across app launches
+- Clear logout option
+
+---
+
+## Common Issues & Solutions
+
+| Issue | Solution |
+|-------|----------|
+| Invalid redirect URI | Add `nihongostart://callback` in Spotify Dashboard |
+| URL scheme not working | Add `nihongostart` in Xcode Info → URL Types |
+| Token doesn't persist | Check UserDefaults, verify app sandbox |
+| Can't open Spotify app | Add `spotify://` URL scheme in Info.plist |
+| Login button does nothing | Verify URL scheme, clean build, reinstall app |
+
+---
+
+## Next Steps
+
+After basic OAuth is working:
+
+1. **User Library**: Fetch and display saved tracks
+2. **Top Tracks**: Show user's top Japanese tracks
+3. **Playlists**: Allow creating learning playlists
+4. **Recommendations**: Personalized song suggestions
+5. **Keychain Storage**: Migrate from UserDefaults for better security
+6. **Background Refresh**: Auto-refresh tokens in background
+
+---
+
+## API References
+
+- [Spotify Web API Reference](https://developer.spotify.com/documentation/web-api)
+- [Authorization Code Flow with PKCE](https://developer.spotify.com/documentation/web-api/concepts/authorization/code-flow)
+- [ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession)
+- [CryptoKit](https://developer.apple.com/documentation/cryptokit)
