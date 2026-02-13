@@ -164,10 +164,20 @@ struct ContentView: View {
                 }
             }
 
+            // Toast notification (shown when toggling dev mode)
+            if appSettings.showDevModeToast {
+                ToastNotification(
+                    message: appSettings.isDevModeEnabled ? "Dev Mode Enabled" : "Normal Mode",
+                    icon: appSettings.isDevModeEnabled ? "hammer.fill" : "eye.slash.fill"
+                )
+                .padding(.top, 60)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Dev mode indicator (shown at top when in dev mode)
             if appSettings.isDevModeEnabled {
                 DevModeIndicator()
-                    .padding(.top, 50)
+                    .padding(.top, 10)
             }
         }
     }
@@ -249,28 +259,6 @@ struct MainTabBar: View {
             .padding(.bottom, getSafeAreaBottom())
             .background(Color(UIColor.secondarySystemBackground))
         }
-        .overlay(
-            // Dev mode toast notification
-            VStack {
-                if appSettings.showDevModeToast {
-                    HStack {
-                        Image(systemName: appSettings.isDevModeEnabled ? "hammer.fill" : "eye.slash.fill")
-                            .foregroundColor(.white)
-                        Text(appSettings.isDevModeEnabled ? "Dev Mode Enabled" : "Normal Mode")
-                            .font(.subheadline)
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.8))
-                    .cornerRadius(20)
-                    .padding(.top, 60)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                Spacer()
-            }
-            .animation(.spring(response: 0.3), value: appSettings.showDevModeToast)
-        )
     }
 
     func getSafeAreaBottom() -> CGFloat {
@@ -316,20 +304,15 @@ struct MainTabBarButton: View {
         }
         .buttonStyle(PlainButtonStyle())
         // Hidden: Long press on Learn tab toggles dev mode
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 2)
-                .onChanged { _ in
-                    if tab == .learn && !longPressActive {
-                        longPressActive = true
-                    }
-                }
-                .onEnded { _ in
-                    if tab == .learn && longPressActive {
-                        longPressActive = false
-                        AppSettings.shared.toggleDevMode()
-                    }
-                }
-        )
+        .onLongPressGesture(minimumDuration: 2, pressing: { isPressing in
+            if tab == .learn {
+                longPressActive = isPressing
+            }
+        }, perform: {
+            if tab == .learn {
+                AppSettings.shared.toggleDevMode()
+            }
+        })
     }
 }
 
@@ -371,5 +354,30 @@ struct DevModeIndicator: View {
         .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
         .padding(.horizontal, 16)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+}
+
+// MARK: - Toast Notification
+
+struct ToastNotification: View {
+    let message: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(.white)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.85))
+        )
+        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .padding(.horizontal, 20)
     }
 }
