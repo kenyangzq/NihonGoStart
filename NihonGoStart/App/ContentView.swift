@@ -63,47 +63,71 @@ enum LearnSubTab: Int, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var selectedMainTab: MainTab = .learn
     @State private var selectedLearnSubTab: LearnSubTab = .kana
+    @ObservedObject private var appSettings = AppSettings.shared
+    @State private var showSettings = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Content area
-            Group {
-                switch selectedMainTab {
-                case .learn:
-                    // Learn content
-                    Group {
-                        switch selectedLearnSubTab {
-                        case .kana:
-                            KanaView()
-                        case .kanaPractice:
-                            KanaFlashcardView()
-                        case .vocabulary:
-                            FlashcardView()
-                        case .phrases:
-                            PhrasesView()
-                        case .sentences:
-                            SentencesView()
-                        case .grammar:
-                            GrammarView()
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                // Content area
+                Group {
+                    switch selectedMainTab {
+                    case .learn:
+                        // Learn content
+                        Group {
+                            switch selectedLearnSubTab {
+                            case .kana:
+                                KanaView()
+                            case .kanaPractice:
+                                KanaFlashcardView()
+                            case .vocabulary:
+                                FlashcardView()
+                            case .phrases:
+                                PhrasesView()
+                            case .sentences:
+                                SentencesView()
+                            case .grammar:
+                                GrammarView()
+                            }
                         }
+                    case .songs:
+                        SongsView()
+                    case .comic:
+                        ComicTranslationView()
                     }
-                case .songs:
-                    SongsView()
-                case .comic:
-                    ComicTranslationView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Secondary tab bar for Learn (above main tab bar)
+                if selectedMainTab == .learn {
+                    LearnSubTabBar(selectedSubTab: $selectedLearnSubTab, showBottomSafeArea: !appSettings.devModeEnabled)
+                }
+
+                // Main tab bar (hidden in user mode since only Learn tab exists)
+                if appSettings.devModeEnabled {
+                    MainTabBar(selectedTab: $selectedMainTab, tabs: appSettings.visibleTabs)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Secondary tab bar for Learn (above main tab bar)
-            if selectedMainTab == .learn {
-                LearnSubTabBar(selectedSubTab: $selectedLearnSubTab)
+            // Settings gear button
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.gray)
+                    .padding(12)
             }
-
-            // Main tab bar
-            MainTabBar(selectedTab: $selectedMainTab)
         }
         .edgesIgnoringSafeArea(.bottom)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
+        .onChange(of: appSettings.devModeEnabled) {
+            if !appSettings.devModeEnabled && selectedMainTab != .learn {
+                selectedMainTab = .learn
+            }
+        }
     }
 }
 
@@ -111,6 +135,7 @@ struct ContentView: View {
 
 struct LearnSubTabBar: View {
     @Binding var selectedSubTab: LearnSubTab
+    var showBottomSafeArea: Bool = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -126,7 +151,15 @@ struct LearnSubTabBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
+        .padding(.bottom, showBottomSafeArea ? getSafeAreaBottom() : 0)
         .background(Color(UIColor.secondarySystemBackground))
+    }
+
+    private func getSafeAreaBottom() -> CGFloat {
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.first as? UIWindowScene
+        let window = windowScene?.windows.first
+        return window?.safeAreaInsets.bottom ?? 0
     }
 }
 
@@ -164,13 +197,14 @@ struct LearnSubTabButton: View {
 
 struct MainTabBar: View {
     @Binding var selectedTab: MainTab
+    var tabs: [MainTab] = MainTab.allCases
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
 
             HStack(spacing: 0) {
-                ForEach(MainTab.allCases) { tab in
+                ForEach(tabs) { tab in
                     MainTabBarButton(
                         tab: tab,
                         selectedTab: $selectedTab

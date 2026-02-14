@@ -36,10 +36,12 @@ NihonGoStart/
 │   │   ├── Comic/                   # Comic translation views
 │   │   │   ├── ComicTranslationView.swift  # Manga OCR & translation UI + full screen mode
 │   │   │   └── BookmarksView.swift  # Saved translations UI
-│   │   └── Songs/                   # Music/Apple Music views
-│   │       └── SongsView.swift      # Apple Music integration UI (user auth, search, playback, lyrics)
+│   │   ├── Songs/                   # Music/Apple Music views
+│   │   │   └── SongsView.swift      # Apple Music integration UI (user auth, search, playback, lyrics)
+│   │   └── SettingsView.swift       # Settings sheet (dev mode toggle)
 │   │
 │   ├── Managers/                    # Business logic & API clients
+│   │   ├── AppSettings.swift        # App settings (dev mode toggle, persisted via UserDefaults)
 │   │   ├── ComicTranslationManager.swift  # Azure Vision, OCR, translation logic
 │   │   ├── BookmarksManager.swift   # Bookmarks persistence
 │   │   ├── MusicManager.swift       # Apple Music integration with MusicKit (user auth, playback, library)
@@ -138,6 +140,7 @@ For Apple Music integration, credentials are stored in `Secrets.swift`.
 
 ### Singleton Managers
 The app uses shared singleton managers for state management:
+- `AppSettings.shared` - App settings (dev mode toggle, persisted via UserDefaults)
 - `ComicTranslationManager.shared` - Comic translation state & API calls
 - `BookmarksManager.shared` - Bookmarked translations persistence
 - `MusicManager.shared` - Apple Music integration with MusicKit (search, playback)
@@ -228,6 +231,15 @@ The Songs feature integrates with Apple Music using the native MusicKit framewor
 - Preview playback (30-second clips) available for all tracks
 - Full playback requires Apple Music subscription and user authorization
 - Simplified authorization flow - uses MusicKit's built-in authorization when needed
+
+### Dev Mode
+- Settings accessible via gear icon (top-right corner of main view)
+- Toggle enables/disables Songs and Comic tabs (dev features)
+- Default: off (only Learn tab visible, main tab bar hidden)
+- Preference persisted via UserDefaults (`devModeEnabled` key)
+- Auto-resets to Learn tab when dev mode is turned off while on a dev-only tab
+- `AppSettings.shared` provides `visibleTabs` computed property used by `MainTabBar`
+- In user mode, `LearnSubTabBar` handles bottom safe area padding (since main tab bar is hidden)
 
 ### Session Persistence
 - Comic sessions saved to Documents/ComicSessions/
