@@ -13,7 +13,9 @@ A Japanese language learning iOS app built with SwiftUI.
 - **Grammar** - Grammar guide covering particles, verb forms, adjectives, and more, organized by JLPT level and category
 
 ### Songs
-- Spotify integration for searching and playing Japanese music for listening practice
+- Apple Music integration for searching and playing Japanese music for listening practice
+- Preview playback (30-second clips) for all users, full playback with Apple Music subscription
+- Synchronized lyrics display with TTML parsing
 
 ### Comic Translation
 - Upload manga/comic pages (images or PDFs)
@@ -24,6 +26,104 @@ A Japanese language learning iOS app built with SwiftUI.
 - Audio pronunciation for extracted text
 - Bookmark and save translated text
 - Session persistence across app restarts
+
+## Architecture
+
+> For the full interactive diagram, open [`docs/architecture.drawio`](docs/architecture.drawio) in [draw.io](https://app.diagrams.net/).
+
+```mermaid
+graph TD
+    subgraph App["NihonGoStart iOS App"]
+        Entry["NihonGoStartApp<br/><i>@main Entry Point</i>"]
+        CV["ContentView<br/><i>Tab Router</i>"]
+        Entry --> CV
+
+        subgraph Views["UI Layer"]
+            direction TB
+            subgraph LearnTab["Learn Tab"]
+                Kana[KanaView]
+                KanaPractice[KanaFlashcardView]
+                Vocab[FlashcardView]
+                Phrases[PhrasesView]
+                Sentences[SentencesView]
+                Grammar[GrammarView]
+            end
+            subgraph SongsTab["Songs Tab"]
+                Songs[SongsView]
+            end
+            subgraph ComicTab["Comic Tab"]
+                Comic[ComicTranslationView]
+                FullScreen[FullScreenComicView]
+                Bookmarks[BookmarksView]
+            end
+            Settings["SettingsView<br/><i>(Sheet)</i>"]
+        end
+
+        CV --> LearnTab
+        CV --> SongsTab
+        CV --> ComicTab
+        CV -.->|sheet| Settings
+
+        subgraph Managers["Business Logic"]
+            AS[AppSettings]
+            CTM[ComicTranslationManager]
+            MM[MusicManager]
+            BM[BookmarksManager]
+            SM[SpeechManager]
+            WDP[WidgetDataProvider]
+        end
+
+        Settings --> AS
+        ComicTab --> CTM
+        ComicTab --> BM
+        SongsTab --> MM
+        LearnTab --> SM
+        ComicTab --> SM
+        Entry -.->|sync on launch| WDP
+
+        subgraph Data["Data Layer"]
+            DL[DataLoader] --> SD[SeedData] --> JSON["JSON Resources"]
+            UD[UserDefaults]
+            Docs["Documents/<br/>ComicSessions"]
+            AG[App Group]
+        end
+
+        AS --> UD
+        BM --> UD
+        CTM --> Docs
+        WDP --> AG
+        LearnTab --> DL
+    end
+
+    subgraph External["External Services"]
+        AzureVision["Azure AI Vision<br/><i>OCR</i>"]
+        AzureOAI["Azure OpenAI<br/><i>Translation</i>"]
+        Gemini["Google Gemini<br/><i>Translation</i>"]
+        AzureTrans["Azure Translator<br/><i>Fallback</i>"]
+        AppleTrans["Apple Translation<br/><i>Framework</i>"]
+        MusicKit["Apple MusicKit"]
+        MangaOCR["manga-ocr Server<br/><i>Python/FastAPI</i>"]
+        AVSpeech["AVSpeechSynthesizer"]
+    end
+
+    CTM --> AzureVision
+    CTM --> AzureOAI
+    CTM --> Gemini
+    CTM --> AzureTrans
+    CTM --> AppleTrans
+    CTM --> MangaOCR
+    MM --> MusicKit
+    SM --> AVSpeech
+
+    subgraph Widget["Widget Extension"]
+        WE["NihonGoStartWidget"]
+        WI["AppIntents<br/><i>SwapCard / RevealMeaning</i>"]
+    end
+
+    AG -->|App Group| WE
+```
+
+**Translation Fallback Chain:** Azure OpenAI → Gemini → Azure Translator → Apple Translation
 
 ## Setup
 
@@ -62,9 +162,14 @@ enum Secrets {
 
 **Note:** `Secrets.swift` is git-ignored to protect your API keys.
 
-### Spotify Integration (Optional)
+### Apple Music Integration (Optional)
 
-For the Songs feature, update Spotify credentials directly in `SpotifyManager.swift`.
+For the Songs feature, add your MusicKit credentials to `Secrets.swift`:
+- `appleMusicTeamId` - Your Apple Developer Team ID
+- `appleMusicKeyId` - Your MusicKit Key ID
+- `appleMusicPrivateKey` - Base64-encoded .p8 private key
+
+See `CLAUDE.md` for detailed setup instructions.
 
 ### Manga-OCR Backend (Optional)
 
@@ -96,13 +201,18 @@ NihonGoStart/
 │   ├── Views/                       # UI views organized by feature
 │   │   ├── Learning/                # Kana, Vocabulary, Phrases, Sentences, Grammar views
 │   │   ├── Comic/                   # ComicTranslationView, BookmarksView
-│   │   └── Songs/                   # SongsView (Spotify integration)
+│   │   ├── Songs/                   # SongsView (Apple Music integration)
+│   │   └── SettingsView.swift       # Settings sheet (dev mode toggle)
 │   │
 │   ├── Managers/                    # Business logic & API clients
+│   │   ├── AppSettings.swift        # Dev mode toggle (UserDefaults)
 │   │   ├── ComicTranslationManager.swift
 │   │   ├── BookmarksManager.swift
-│   │   ├── SpotifyManager.swift
+│   │   ├── MusicManager.swift       # Apple Music integration (MusicKit)
 │   │   └── SpeechManager.swift
+│   │
+│   ├── Shared/                      # Shared code (app + widget)
+│   │   └── WidgetDataProvider.swift  # Widget data sync via App Groups
 │   │
 │   ├── Data/                        # Data loading utilities
 │   │   ├── DataLoader.swift

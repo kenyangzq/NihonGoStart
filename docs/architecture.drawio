@@ -1,0 +1,349 @@
+<mxfile host="app.diagrams.net" agent="Claude Code" version="24.0.0">
+  <diagram name="NihonGoStart Architecture" id="nihongo-arch">
+    <mxGraphModel dx="1422" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="860" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ==================== TITLE ==================== -->
+        <mxCell id="title" value="NihonGoStart - App Architecture" style="text;html=1;fontSize=22;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="400" y="5" width="500" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== APP ENTRY ==================== -->
+        <mxCell id="app" value="&lt;b&gt;NihonGoStartApp&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;@main Entry Point&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="50" width="200" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== UI LAYER ==================== -->
+        <mxCell id="ui-bg" value="UI Layer (Views)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;opacity=30;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="115" width="880" height="290" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cv" value="&lt;b&gt;ContentView&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Tab Router&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="140" width="155" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Learn Tab -->
+        <mxCell id="learn-tab" value="&lt;b&gt;Learn Tab&lt;/b&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px&quot;&gt;KanaView&lt;br&gt;KanaFlashcardView&lt;br&gt;FlashcardView (Vocab)&lt;br&gt;PhrasesView&lt;br&gt;SentencesView&lt;br&gt;GrammarView&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;verticalAlign=top;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="200" width="175" height="185" as="geometry"/>
+        </mxCell>
+
+        <!-- Songs Tab -->
+        <mxCell id="songs-tab" value="&lt;b&gt;Songs Tab&lt;/b&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px&quot;&gt;SongsView&lt;br&gt;&lt;i&gt;Apple Music&lt;br&gt;Search &amp;amp; Playback&lt;/i&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;verticalAlign=top;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="255" y="200" width="155" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Comic Tab -->
+        <mxCell id="comic-tab" value="&lt;b&gt;Comic Tab&lt;/b&gt;&lt;hr size=&quot;1&quot;&gt;&lt;font style=&quot;font-size:10px&quot;&gt;ComicTranslationView&lt;br&gt;FullScreenComicView&lt;br&gt;BookmarksView&lt;br&gt;&lt;i&gt;OCR + Translation&lt;br&gt;Session Management&lt;/i&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;verticalAlign=top;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="200" width="175" height="185" as="geometry"/>
+        </mxCell>
+
+        <!-- Settings View (standalone) -->
+        <mxCell id="settings" value="&lt;b&gt;SettingsView&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Dev Mode Toggle&lt;br&gt;&lt;i&gt;(Sheet)&lt;/i&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;shadow=1;dashed=1;dashPattern=8 4;" vertex="1" parent="1">
+          <mxGeometry x="740" y="200" width="145" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== MANAGER LAYER ==================== -->
+        <mxCell id="mgr-bg" value="Business Logic (Managers)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;opacity=30;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="425" width="880" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app-settings" value="&lt;b&gt;AppSettings&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="455" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="comic-mgr" value="&lt;b&gt;ComicTranslation&lt;br&gt;Manager&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="190" y="455" width="150" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="music-mgr" value="&lt;b&gt;MusicManager&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="360" y="455" width="130" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="bookmarks-mgr" value="&lt;b&gt;Bookmarks&lt;br&gt;Manager&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="510" y="455" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="speech-mgr" value="&lt;b&gt;SpeechManager&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="650" y="455" width="130" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="widget-dp" value="&lt;b&gt;WidgetData&lt;br&gt;Provider&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="800" y="455" width="100" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== DATA LAYER ==================== -->
+        <mxCell id="data-bg" value="Data Layer (Persistence &amp; Storage)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;opacity=30;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="30" y="535" width="880" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="data-loader" value="&lt;b&gt;DataLoader&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="565" width="100" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="seed-data" value="&lt;b&gt;SeedData&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="170" y="565" width="100" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="json" value="&lt;b&gt;JSON Resources&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;kana / vocab / phrases&lt;br&gt;sentences / grammar&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="290" y="558" width="145" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="userdefaults" value="&lt;b&gt;UserDefaults&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Settings, Bookmarks&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="455" y="558" width="130" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="documents" value="&lt;b&gt;Documents/&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;ComicSessions&lt;br&gt;Translation Cache&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="605" y="558" width="135" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="app-group" value="&lt;b&gt;App Group&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Widget Data Sync&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="558" width="130" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== EXTERNAL SERVICES ==================== -->
+        <mxCell id="ext-bg" value="External Services" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;opacity=30;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="960" y="115" width="250" height="380" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="azure-vision" value="Azure AI Vision (OCR)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="150" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="azure-openai" value="Azure OpenAI (Translation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="192" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="gemini" value="Google Gemini (Translation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="234" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="azure-translator" value="Azure Translator (Fallback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="276" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="apple-translation" value="Apple Translation Framework" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="318" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="apple-musickit" value="Apple MusicKit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="370" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="manga-ocr" value="manga-ocr Server (Python)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="412" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="avspeech" value="AVSpeechSynthesizer (TTS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="454" width="210" height="32" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== WIDGET EXTENSION ==================== -->
+        <mxCell id="widget-bg" value="Widget Extension (WidgetKit)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;opacity=30;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="960" y="530" width="250" height="130" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="widget" value="&lt;b&gt;NihonGoStartWidget&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Flashcard Widget Views&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="560" width="210" height="38" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="widget-intents" value="&lt;b&gt;AppIntents&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;SwapCard / RevealMeaning&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;fontSize=11;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="608" width="210" height="38" as="geometry"/>
+        </mxCell>
+
+        <!-- ==================== EDGES ==================== -->
+
+        <!-- App Entry → ContentView -->
+        <mxCell id="e1" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="app" target="cv" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ContentView → Learn Tab -->
+        <mxCell id="e2" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="cv" target="learn-tab" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ContentView → Songs Tab -->
+        <mxCell id="e3" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="cv" target="songs-tab" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ContentView → Comic Tab -->
+        <mxCell id="e4" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="cv" target="comic-tab" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ContentView → SettingsView (dashed) -->
+        <mxCell id="e5" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;dashPattern=8 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="cv" target="settings" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5-label" value="sheet" style="edgeLabel;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" parent="e5">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- SettingsView → AppSettings -->
+        <mxCell id="e6" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;dashPattern=8 4;" edge="1" source="settings" target="app-settings" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Learn Tab → SpeechManager -->
+        <mxCell id="e7" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0;entryDx=0;entryDy=0;strokeColor=#999999;" edge="1" source="learn-tab" target="speech-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Songs Tab → MusicManager -->
+        <mxCell id="e8" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="songs-tab" target="music-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Comic Tab → ComicTranslationManager -->
+        <mxCell id="e9" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="comic-tab" target="comic-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Comic Tab → BookmarksManager -->
+        <mxCell id="e10" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="comic-tab" target="bookmarks-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Comic Tab → SpeechManager -->
+        <mxCell id="e11" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999999;" edge="1" source="comic-tab" target="speech-mgr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ComicTranslationManager → External Services -->
+        <mxCell id="e12" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="azure-vision" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e13" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="azure-openai" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e14" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="gemini" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e15" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="azure-translator" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e16" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="apple-translation" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e17" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="comic-mgr" target="manga-ocr" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- MusicManager → Apple MusicKit -->
+        <mxCell id="e18" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="music-mgr" target="apple-musickit" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- SpeechManager → AVSpeechSynthesizer -->
+        <mxCell id="e19" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;" edge="1" source="speech-mgr" target="avspeech" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Manager → Data Layer connections -->
+        <mxCell id="e20" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="app-settings" target="userdefaults" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e21" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="bookmarks-mgr" target="userdefaults" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e22" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="comic-mgr" target="documents" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e23" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="widget-dp" target="app-group" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- DataLoader → SeedData → JSON -->
+        <mxCell id="e24" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="data-loader" target="seed-data" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e25" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#b85450;" edge="1" source="seed-data" target="json" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Learn Tab → DataLoader -->
+        <mxCell id="e26" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#999999;" edge="1" source="learn-tab" target="data-loader" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- App → WidgetDataProvider (sync on launch) -->
+        <mxCell id="e27" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;dashPattern=8 4;strokeColor=#56517e;" edge="1" source="app" target="widget-dp" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e27-label" value="sync on launch" style="edgeLabel;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" parent="e27">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- WidgetDataProvider → Widget Extension -->
+        <mxCell id="e28" style="rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#56517e;" edge="1" source="app-group" target="widget" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e28-label" value="App Group" style="edgeLabel;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#666666;" vertex="1" connectable="0" parent="e28">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ==================== LEGEND ==================== -->
+        <mxCell id="legend-bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#cccccc;opacity=80;" vertex="1" parent="1">
+          <mxGeometry x="30" y="650" width="500" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-title" value="&lt;b&gt;Legend:&lt;/b&gt;" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="652" width="60" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg1" value="" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="675" width="16" height="16" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg1t" value="Views" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="673" width="40" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg2" value="" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="110" y="675" width="16" height="16" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg2t" value="Managers" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="130" y="673" width="60" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg3" value="" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="200" y="675" width="16" height="16" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg3t" value="Data/Storage" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="220" y="673" width="75" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg4" value="" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="300" y="675" width="16" height="16" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg4t" value="External Services" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="320" y="673" width="90" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg5" value="" style="rounded=1;fillColor=#d0cee2;strokeColor=#56517e;" vertex="1" parent="1">
+          <mxGeometry x="420" y="675" width="16" height="16" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg5t" value="Widget" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="440" y="673" width="50" height="20" as="geometry"/>
+        </mxCell>
+
+        <!-- Translation fallback chain note -->
+        <mxCell id="fallback-note" value="&lt;font style=&quot;font-size:10px&quot;&gt;&lt;b&gt;Translation Fallback Chain:&lt;/b&gt;&lt;br&gt;Azure OpenAI → Gemini → Azure Translator → Apple Translation&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=top;rounded=1;fillColor=#f5f5f5;strokeColor=#cccccc;spacingLeft=5;spacingTop=3;" vertex="1" parent="1">
+          <mxGeometry x="960" y="700" width="250" height="45" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
